@@ -10,6 +10,3 @@ coverage.out
 /deploy/data/
 /deploy/.env
 *.local.toml
-
-# packwiz working files
-/pack/*/.packwizignore.local

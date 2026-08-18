@@ -4,15 +4,18 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## What this is
 
-`weloveyou.mc` — a Fabric modpack plus the platform that ships it: a Dockerized Minecraft
-server, packwiz-versioned mods delivered by our own Go updater, Discord as the entire
-front-end, and a squaremap live map served from Cloudflare R2.
+`weloveyou.mc` — the platform behind a Fabric modpack: a Dockerized Minecraft server, a
+Discord bot that is the entire front-end, and a squaremap live map served from Cloudflare R2.
 
-Two Go binaries, one Cloudflare Worker, one packwiz repo. Plan lives at
+**The modpack itself lives in a separate repository, `weloveyou-pack`** — pack channels, the
+Prism instance templates, and their publishing pipeline. This repo ships code; that one ships
+content. Split because the cadences differ: a pack release is weekly and touches no Go.
+
+Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phase 0 complete** — skeleton, CI, and the representative pack. Nothing deployed.
-Next is phase 1, the benchmark harness.
+**Status: phase 0 complete, phase 3 (client distribution) done in `weloveyou-pack`.**
+Nothing deployed. Next is phase 1, the benchmark harness.
 
 ## Commands
 
@@ -24,22 +27,18 @@ gofmt -l cmd internal              # must print nothing
 
 scripts/coverage.sh                # enforce .coverage-floors — the CI gate
 scripts/coverage.sh --report       # same table, always exit 0
-scripts/pack-check.sh              # side invariant + reachability
-scripts/pack-check.sh --full       # also downloads and hashes everything (slow)
 
 go run ./cmd/wly version
 go run ./cmd/wlyup version
 
 docker compose -f deploy/docker-compose.yml up -d    # needs deploy/.env
-cd pack/stable && packwiz refresh                    # after any pack edit
 ```
 
 `go test -race` needs a C toolchain and **there is no gcc on this machine** — it runs on the
 CI runners, which have one. Do not take a local `-race` failure at face value.
 
 Requires Go 1.26.6 (`go.mod` pins it; 1.26.4 and .5 carry `crypto/tls` and `net/http`
-advisories that `govulncheck` fails CI on). `packwiz` must be on PATH to touch `pack/`; CI
-pins it to an exact pseudo-version because the project publishes no tags.
+advisories that `govulncheck` fails CI on).
 
 ## Architecture
 
@@ -51,8 +50,6 @@ internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, dif
 internal/mcevents/  PURE: log line -> event, one regex table per MC generation
 internal/bench/     JVM flag profiles, workload driver, result table
 worker/             Cloudflare Worker, R2 binding, read-only
-pack/stable/        packwiz pack — MC 1.21.1 Fabric
-pack/edge/          packwiz pack — MC 26.2 Fabric (later)
 deploy/             Dockerfile for wly, docker-compose.yml for mc + wly
 scripts/            CI helpers that must also run by hand
 ```
@@ -77,15 +74,22 @@ deliberately no authenticated write path at the edge.
   died in March 2025. `stable` is 1.21.1 with Oritech as the tech spine. Create Fly is a live
   Fabric fork of Create for 26.2, but it has no addon ecosystem — an `edge` question, not a
   `stable` one.
+- **Players install through Prism Launcher, not a binary we ship.** The instance zip carries a
+  pinned `packwiz-installer.jar` run as a pre-launch step, so nothing unsigned is executed and
+  SmartScreen never enters it. `cmd/wlyup` survives as an optional CLI and as insurance
+  against packwiz-installer, which last shipped in April 2024.
 - **Pack releases never deploy anything.** The pack lives in R2; the server fetches it via
   `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
 
-## The invariant that matters most
+## Cross-repo contract
 
-**Every entry in every packwiz pack declares an explicit `side`.** An unset side defaults to
-both, which quietly ships Sodium to the server and costs real TPS. `scripts/pack-check.sh`
-enforces this and CI runs it on every PR. It has been verified to fire on a missing side, an
-invalid side, and a stale index. Do not weaken it.
+`wly.toml` carries each channel's `pack_url` so the daemon can poll it for releases.
+`weloveyou-pack` carries the same URL in its `channels.toml`, because its instance builder
+substitutes it into `instance.cfg`. One hostname, written twice, deliberately — the
+alternative is a shared config repo, which is more machinery than a hostname is worth.
+
+If a channel's URL changes, both must change. Nothing enforces that automatically; it is one
+of the few places the split costs something.
 
 ## Conventions
 

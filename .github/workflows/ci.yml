@@ -59,24 +59,6 @@ jobs:
         shell: bash
         run: scripts/coverage.sh
 
-  # Structure and reachability only â€” the full hash verification downloads
-  # hundreds of megabytes and belongs in the release path, not on every PR.
-  pack:
-    name: pack invariants
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          cache: true
-      # packwiz publishes no tags, so this is an exact pseudo-version pin
-      # rather than @latest. Bump it deliberately, never implicitly — this
-      # binary decides what every player downloads.
-      - name: install packwiz
-        run: go install github.com/packwiz/packwiz@v0.0.0-20260218225342-dfd8b68a4796
-      - run: scripts/pack-check.sh
-
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
@@ -149,7 +131,7 @@ jobs:
   #    mean storing a long-lived PAT as an Actions secret to save a click.
   dependabot-merge:
     name: dependabot auto-merge
-    needs: [verify, pack, vuln, cross, image]
+    needs: [verify, vuln, cross, image]
     if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     permissions:
