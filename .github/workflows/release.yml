@@ -171,6 +171,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+      # arm64 only: that is what the box runs. amd64 was an image nothing pulled,
+      # built under emulation, which made it the most expensive step in the
+      # pipeline. Add it back the day something x86 needs to run wly.
       - name: set up buildx
         run: docker buildx create --use --name wly-builder
       - name: log in to ghcr
@@ -183,7 +186,7 @@ jobs:
           REPO=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           docker buildx build \
             -f deploy/Dockerfile \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/arm64 \
             --build-arg "VERSION=${TAG}" \
             --build-arg "COMMIT=${GITHUB_SHA}" \
             --label "org.opencontainers.image.revision=${GITHUB_SHA}" \

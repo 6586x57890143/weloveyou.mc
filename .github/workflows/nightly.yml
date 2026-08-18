@@ -8,8 +8,12 @@ name: nightly
 # The stable URL is load-bearing here: the Discord release post links to it, so
 # the "get the patcher" button never needs editing.
 on:
-  schedule:
-    - cron: "0 6 * * *"
+  # Schedule disabled until wlyup does something. It is a phase-8 deliverable and
+  # currently prints a version string; building it for six platforms every night
+  # spends real minutes on a binary nobody can use. Re-enable with the cron below
+  # when Sync lands.
+  #   schedule:
+  #     - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       force:
