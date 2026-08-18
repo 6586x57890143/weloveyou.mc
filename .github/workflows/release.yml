@@ -260,8 +260,21 @@ jobs:
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
           install -m 600 /dev/null key
           install -m 600 /dev/null known_hosts
-          echo "$KEY" > key
-          echo "$KNOWN_HOSTS" > known_hosts
+          # tr -d '' because a secret pasted from Windows carries CRLF, and
+          # OpenSSH rejects the result with "error in libcrypto" — which names
+          # neither the file nor the cause. printf guarantees the trailing
+          # newline a PEM footer needs.
+          printf '%s
+' "$KEY" | tr -d '' > key
+          printf '%s
+' "$KNOWN_HOSTS" | tr -d '' > known_hosts
+
+          # Fail with a sentence someone can act on, rather than 255 from ssh.
+          if ! ssh-keygen -y -f key >/dev/null 2>&1; then
+            echo "::error::DEPLOY_SSH_KEY is not a valid OpenSSH private key. Re-add it with the file itself, newlines intact: gh secret set DEPLOY_SSH_KEY -R <repo> < /path/to/key"
+            exit 1
+          fi
+          echo "deploy key fingerprint: $(ssh-keygen -lf key | awk '{print $2}')"
 
           # StrictHostKeyChecking=yes, never accept-new: this runs unattended
           # against a box that can restart the game server, so an unrecognised
