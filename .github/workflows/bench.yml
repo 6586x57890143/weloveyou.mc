@@ -1,0 +1,71 @@
+name: bench
+
+# The JVM flag sweep.
+#
+# This runs on a SELF-HOSTED runner on the bench box, never on a GitHub-hosted
+# one. Hosted runners are noisy shared VMs; Minecraft TPS numbers measured
+# there would be fiction, and a committed BENCHMARKS.md full of fiction is
+# worse than no file at all.
+on:
+  workflow_dispatch:
+    inputs:
+      workload:
+        description: "Which workload to run"
+        required: true
+        default: both
+        type: choice
+        # A = vanilla worldgen (control). B = the same run against the real
+        # pack. A flag that wins on A and loses on B is a finding, not noise.
+        options: [a, b, both]
+      runs:
+        description: "Repeats per profile — medians are reported, not single runs"
+        required: false
+        default: "3"
+  schedule:
+    # Weekly. Frequent enough to catch a JDK or mod bump moving the numbers,
+    # rare enough that the box is mostly available for playing on.
+    - cron: "0 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    name: jvm sweep
+    runs-on: [self-hosted, bench]
+    timeout-minutes: 720
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: run the sweep
+        run: |
+          go run ./cmd/wly bench \
+            --workload "${{ github.event.inputs.workload || 'both' }}" \
+            --runs "${{ github.event.inputs.runs || '3' }}" \
+            --out BENCHMARKS.md
+
+      # A human merges. The sweep proposes; it does not decide what the server
+      # runs on.
+      - name: open a PR when the numbers moved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- BENCHMARKS.md; then
+            echo "no change in the numbers; nothing to propose"
+            exit 0
+          fi
+          branch="bench/$(date -u +%Y%m%d-%H%M)"
+          git switch -c "$branch"
+          git -c user.name=bench -c user.email=bench@local commit -am "bench: refresh BENCHMARKS.md"
+          git push origin "$branch"
+          gh pr create --fill --title "bench: JVM sweep $(date -u +%Y-%m-%d)" \
+            --body "Automated sweep. Review the medians before merging; anything under ~5% is noise."

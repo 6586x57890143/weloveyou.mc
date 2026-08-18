@@ -1,0 +1,103 @@
+# The whole server: Minecraft plus the wly daemon beside it.
+#
+#   cp deploy/.env.example deploy/.env   # then fill it in
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# The pack is not baked into the image. itzg fetches it from PACKWIZ_URL at
+# start, honouring each entry's `side`, so a pack release needs no rebuild and
+# no deploy — only a restart.
+
+services:
+  mc:
+    image: itzg/minecraft-server:java21
+    container_name: wly-mc
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+    environment:
+      EULA: "TRUE"
+      TYPE: FABRIC
+      VERSION: "1.21.1"
+      FABRIC_LOADER_VERSION: "0.19.3"
+
+      # Everything the server runs comes from here. Client-side entries are
+      # skipped by packwiz, which is why the `side` invariant is enforced in CI.
+      PACKWIZ_URL: "${PACKWIZ_URL:?set PACKWIZ_URL in deploy/.env}"
+
+      MEMORY: "${MC_MEMORY:-6G}"
+      # G1 with Aikar's tuning is the right default under a 16G heap. Any other
+      # profile is JVM_XX_OPTS, never a code change — see BENCHMARKS.md.
+      USE_AIKAR_FLAGS: "true"
+      JVM_XX_OPTS: "${MC_JVM_XX_OPTS:-}"
+
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in deploy/.env}"
+      ONLINE_MODE: "true"
+      ENFORCE_WHITELIST: "true"
+
+      # Watchdog stays on: this server is always-on and does not use autopause,
+      # so a hung tick should kill the process rather than hang the players.
+      OVERRIDE_SERVER_PROPERTIES: "true"
+
+    ports:
+      - "25565:25565"
+      # RCON is loopback only. It is an admin channel with a shared password;
+      # wly reaches it over the compose network, nothing else should.
+      - "127.0.0.1:25575:25575"
+
+    volumes:
+      - mc-data:/data
+
+    stop_grace_period: 120s   # a large modded world takes real time to save
+
+    healthcheck:
+      test: ["CMD", "mc-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 5m        # first boot downloads the whole pack
+
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  wly:
+    image: "${WLY_IMAGE:-ghcr.io/weloveyou/weloveyou.mc:latest}"
+    container_name: wly
+    restart: unless-stopped
+    depends_on:
+      mc:
+        condition: service_healthy
+
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+
+    environment:
+      WLY_CONFIG: /config/wly.toml
+      WLY_RCON_PASSWORD: "${RCON_PASSWORD:?}"
+      WLY_DISCORD_TOKEN: "${WLY_DISCORD_TOKEN:?set WLY_DISCORD_TOKEN in deploy/.env}"
+      WLY_R2_ACCESS_KEY: "${WLY_R2_ACCESS_KEY:?}"
+      WLY_R2_SECRET_KEY: "${WLY_R2_SECRET_KEY:?}"
+
+    volumes:
+      - ../wly.toml:/config/wly.toml:ro
+      # Read-only: wly tails latest.log and reads squaremap's tiles. It has no
+      # business writing into the server's data directory.
+      - mc-data:/mc:ro
+      # Lifecycle control. wly speaks the Docker Engine API over this socket
+      # directly — the image is distroless and has no docker CLI to shell out to.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+    mem_limit: 512m
+    pids_limit: 128
+
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  mc-data:

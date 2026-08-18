@@ -1,0 +1,33 @@
+# wly configuration. Secrets are NOT here — they arrive as environment
+# variables (WLY_DISCORD_TOKEN, WLY_RCON_PASSWORD, WLY_R2_*) because a value in
+# this file would be readable through `docker inspect`.
+#
+# Mounted read-only at /config/wly.toml.
+
+[server]
+rcon_addr = "mc:25575"
+log_path  = "/mc/logs/latest.log"
+tiles_dir = "/mc/squaremap/web/tiles"
+# Container to restart when a pack release lands.
+container = "wly-mc"
+
+[r2]
+endpoint = "https://<account>.r2.cloudflarestorage.com"
+bucket   = "weloveyou-mc"
+
+[discord]
+guild_id = ""
+# One pinned message per surface; wly edits in place rather than reposting.
+status_channel = ""
+events_channel = ""
+releases_channel = ""
+
+# One entry per pack channel. Adding a channel is a table here plus a compose
+# service — no code change.
+[channels.stable]
+mc_version = "1.21.1"
+pack_url   = "https://pack.example.com/stable/pack.toml"
+
+# [channels.edge]
+# mc_version = "26.2"
+# pack_url   = "https://pack.example.com/edge/pack.toml"

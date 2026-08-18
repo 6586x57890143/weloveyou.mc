@@ -1,0 +1,219 @@
+name: release
+
+# Tag-driven. `git tag v1.2.3 && git push origin v1.2.3` produces a GitHub
+# Release with a wlyup binary per platform, a SHA256SUMS file, and a multi-arch
+# wly image on ghcr.io.
+#
+# Third-party actions are deliberately avoided outside of actions/* : this
+# workflow has write access to the repository and the registry, so every action
+# it runs is part of this project's supply chain. Everything else is plain CLI.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (must already exist)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go mod verify
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: scripts/coverage.sh
+
+  build:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: gate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: linux,   goarch: amd64, ext: "" }
+          - { goos: linux,   goarch: arm64, ext: "" }
+          - { goos: darwin,  goarch: amd64, ext: "" }
+          - { goos: darwin,  goarch: arm64, ext: "" }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NAME="wlyup_${TAG}_${GOOS}_${GOARCH}${{ matrix.ext }}"
+          mkdir -p dist
+          # -trimpath and an empty -buildid are what make the output
+          # reproducible: the same source and tag yield identical bytes, so a
+          # third party can rebuild and compare rather than trusting this runner.
+          go build -trimpath \
+            -ldflags="-s -w -buildid= -X weloveyou-mc/internal/buildinfo.version=${TAG} -X weloveyou-mc/internal/buildinfo.commit=${GITHUB_SHA}" \
+            -o "dist/${NAME}" ./cmd/wlyup
+          (cd dist && sha256sum "${NAME}" > "${NAME}.sha256")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wlyup-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/download-artifact@v8
+        with:
+          path: staging
+          merge-multiple: true
+      - name: collect and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find staging -type f ! -name '*.sha256' -exec mv {} dist/ \;
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - name: create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          NOTES=$(mktemp)
+          {
+            echo "## wlyup ${TAG}"
+            echo
+            echo "The weloveyou pack updater. Single static binary — no Java, no launcher"
+            echo "plugin. It reads the published packwiz index and brings your install in"
+            echo "line with it."
+            echo
+            echo "### Install"
+            echo
+            echo '```'
+            echo "# Windows"
+            echo "wlyup_${TAG}_windows_amd64.exe"
+            echo "# Linux / macOS"
+            echo "chmod +x wlyup_${TAG}_linux_amd64 && ./wlyup_${TAG}_linux_amd64"
+            echo '```'
+            echo
+            echo "### Verify"
+            echo
+            echo "Every asset is listed in \`SHA256SUMS\`. Builds use \`-trimpath\` and an"
+            echo "empty \`-buildid\`, so rebuilding this tag with the same Go version"
+            echo "reproduces the same bytes:"
+            echo
+            echo '```'
+            echo "sha256sum -c SHA256SUMS"
+            echo '```'
+            echo
+            echo "\`wlyup\` rewrites your mods folder to match the pack. Point it at a copy"
+            echo "first if you have local changes you care about."
+          } > "$NOTES"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --title "wlyup ${TAG}" \
+              --notes-file "$NOTES" \
+              --verify-tag
+          fi
+
+  image:
+    name: publish image
+    needs: gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - name: set up buildx
+        run: docker buildx create --use --name wly-builder
+      - name: log in to ghcr
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: build and push
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          REPO=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
+          docker buildx build \
+            -f deploy/Dockerfile \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg "VERSION=${TAG}" \
+            --build-arg "COMMIT=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+            --label "org.opencontainers.image.version=${TAG}" \
+            --tag "${REPO}:${TAG}" \
+            --tag "${REPO}:latest" \
+            --provenance=true \
+            --sbom=true \
+            --push .
+
+  # Only wly and compose changes reach the box. A pack release does not deploy
+  # anything: the pack lives in R2 and wly restarts the server to pick it up.
+  deploy:
+    name: deploy to the server
+    needs: [publish, image]
+    runs-on: ubuntu-latest
+    # Set DEPLOY_HOST/DEPLOY_USER as variables and DEPLOY_SSH_KEY as a secret to
+    # arm this. Without them it is skipped rather than failed, so the first few
+    # releases can happen before a box exists.
+    if: vars.DEPLOY_HOST != ''
+    environment: production
+    steps:
+      - name: ssh and roll forward
+        env:
+          KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ vars.DEPLOY_HOST }}
+          USER: ${{ vars.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          install -m 600 /dev/null key
+          printf '%s\n' "$KEY" > key
+          ssh -i key -o StrictHostKeyChecking=accept-new "$USER@$HOST" \
+            'cd ~/weloveyou.mc && git pull --ff-only && docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d'

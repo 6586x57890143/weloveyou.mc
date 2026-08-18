@@ -1,0 +1,170 @@
+name: ci
+
+# Every push and pull request. Two jobs carry this project's real invariants:
+# `verify` (the coverage floors) and `pack` (every mod declares an explicit
+# side). Neither may gain `continue-on-error`.
+on:
+  push:
+    branches: ["**"]
+    tags-ignore: ["v*", "pack-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  verify:
+    name: verify (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Linux is the container target, Windows is where most players run
+        # wlyup. Both are load-bearing, so both are tested rather than
+        # cross-compiled and hoped for.
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - run: go mod verify
+
+      - name: gofmt
+        shell: bash
+        run: |
+          unformatted=$(gofmt -l cmd internal)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt needed on:"; echo "$unformatted"; exit 1
+          fi
+
+      - run: go vet ./...
+
+      # A C toolchain ships on both runners, which is why the race detector
+      # runs here rather than only on a maintainer's machine.
+      - run: go test -race -count=1 ./...
+
+      - name: coverage floors
+        shell: bash
+        run: scripts/coverage.sh
+
+  # Structure and reachability only â€” the full hash verification downloads
+  # hundreds of megabytes and belongs in the release path, not on every PR.
+  pack:
+    name: pack invariants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # packwiz publishes no tags, so this is an exact pseudo-version pin
+      # rather than @latest. Bump it deliberately, never implicitly — this
+      # binary decides what every player downloads.
+      - name: install packwiz
+        run: go install github.com/packwiz/packwiz@v0.0.0-20260218225342-dfd8b68a4796
+      - run: scripts/pack-check.sh
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+  cross:
+    name: cross-compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      # The release matrix must keep compiling on every commit. A broken GOOS
+      # discovered at tag time is a broken release.
+      - name: build every release target
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          while read -r goos goarch; do
+            echo "==> $goos/$goarch"
+            GOOS=$goos GOARCH=$goarch go build -trimpath -o /dev/null ./cmd/wlyup
+            GOOS=$goos GOARCH=$goarch go build -trimpath -o /dev/null ./cmd/wly
+          done <<'EOF'
+          windows amd64
+          windows arm64
+          linux amd64
+          linux arm64
+          darwin amd64
+          darwin arm64
+          EOF
+
+  image:
+    name: container image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # Build only â€” no push, no registry credentials on PR builds. The
+      # Dockerfile reruns vet and the suite inside the build, so this also
+      # proves the image cannot be produced from a red tree.
+      - name: docker build
+        run: docker build -f deploy/Dockerfile -t wly:ci .
+      - name: image runs
+        run: docker run --rm wly:ci version
+      - name: compose is valid
+        run: |
+          set -a; . deploy/.env.example; set +a
+          PACKWIZ_URL=x RCON_PASSWORD=x WLY_DISCORD_TOKEN=x \
+          WLY_R2_ACCESS_KEY=x WLY_R2_SECRET_KEY=x \
+            docker compose -f deploy/docker-compose.yml config -q
+
+  # Merge a Dependabot PR once, and only once, every job above has passed.
+  # Scope is deliberately narrow: gomod patch and minor only.
+  #
+  #  - A gomod major is left for a human: it can drop API this build depends on
+  #    in a way that still compiles.
+  #  - github-actions bumps are also left for a human, for a mechanical reason
+  #    rather than a judgement one. Those PRs edit .github/workflows, and the
+  #    automatic GITHUB_TOKEN is refused permission to merge a workflow change
+  #    (no `workflows` scope, and it cannot be granted). Auto-merging them would
+  #    mean storing a long-lived PAT as an Actions secret to save a click.
+  dependabot-merge:
+    name: dependabot auto-merge
+    needs: [verify, pack, vuln, cross, image]
+    if: github.event_name == 'pull_request' && github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: fetch metadata
+        id: meta
+        uses: dependabot/fetch-metadata@v2
+      - name: squash-merge safe updates
+        if: >-
+          steps.meta.outputs.package-ecosystem == 'go_modules' &&
+          (steps.meta.outputs.update-type == 'version-update:semver-patch' ||
+           steps.meta.outputs.update-type == 'version-update:semver-minor')
+        run: gh pr merge --squash --delete-branch "$PR_URL"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

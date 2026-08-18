@@ -1,0 +1,91 @@
+name: pack
+
+# Publishing a modpack channel. `git tag pack-stable-v1.4.2 && git push --tags`
+# validates the channel and syncs its metadata to R2.
+#
+# The Discord announcement is deliberately NOT here. wly polls the published
+# pack.toml for a version change and posts the release itself, which keeps the
+# bot token out of GitHub entirely and means publishing by hand still produces
+# the announcement. One code path, not two.
+on:
+  push:
+    tags: ["pack-*-v*"]
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Channel to publish"
+        required: true
+        type: choice
+        options: [stable, edge]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pack-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  publish:
+    name: validate and sync
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: install packwiz
+        run: go install github.com/packwiz/packwiz@v0.0.0-20260218225342-dfd8b68a4796
+
+      - name: resolve channel
+        id: ch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${{ github.event.inputs.channel }}" ]; then
+            channel="${{ github.event.inputs.channel }}"
+          else
+            # pack-stable-v1.4.2 -> stable
+            channel=$(echo "${GITHUB_REF_NAME}" | sed -E 's/^pack-(.+)-v[^-]+$/\1/')
+          fi
+          [ -d "pack/$channel" ] || { echo "::error::no such channel: pack/$channel"; exit 1; }
+          version=$(grep -m1 -oE '^version *= *"[^"]+"' "pack/$channel/pack.toml" | grep -oE '"[^"]+"' | tr -d '"')
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publishing $channel v$version"
+
+      # Full verification, not the PR-time reachability check: every file is
+      # downloaded and hashed before anything reaches players.
+      - name: validate
+        run: scripts/pack-check.sh --full
+
+      - name: sync to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          ENDPOINT: ${{ vars.R2_ENDPOINT }}
+          BUCKET: ${{ vars.R2_BUCKET }}
+          CHANNEL: ${{ steps.ch.outputs.channel }}
+        run: |
+          set -euo pipefail
+          # --delete so a mod removed from the pack disappears from the CDN too;
+          # a stale .pw.toml left behind would still be resolvable by an
+          # updater that had cached the old index.
+          aws s3 sync "pack/${CHANNEL}/" "s3://${BUCKET}/pack/${CHANNEL}/" \
+            --endpoint-url "$ENDPOINT" \
+            --delete \
+            --no-progress \
+            --cache-control "public, max-age=60"
+
+      - name: summary
+        run: |
+          echo "### pack ${{ steps.ch.outputs.channel }} v${{ steps.ch.outputs.version }} published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "wly will notice the version change and post the release to Discord." >> "$GITHUB_STEP_SUMMARY"

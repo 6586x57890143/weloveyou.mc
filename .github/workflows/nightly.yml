@@ -1,0 +1,175 @@
+name: nightly
+
+# A rolling pre-release named `nightly`, rebuilt from the tip of main once a
+# day and replaced in place, so there is always exactly one "latest nightly" at
+# a stable URL and no tag clutter. It is marked pre-release, so it never
+# displaces a real v* tag as the repository's Latest release.
+#
+# The stable URL is load-bearing here: the Discord release post links to it, so
+# the "get the patcher" button never needs editing.
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if main has not changed since the last nightly"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never let two nightlies publish over each other. Not cancel-in-progress: a
+# publish half-way through replacing the release must finish, not be killed.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+env:
+  GOTOOLCHAIN: local
+  GOFLAGS: -mod=readonly
+
+jobs:
+  # Skip the whole build when main has not moved. The binaries are reproducible
+  # (-trimpath, empty -buildid), so an unchanged tree would only republish
+  # identical bytes — a scheduled no-op, not a new build.
+  decide:
+    name: decide whether to build
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          last=$(git rev-parse -q --verify "refs/tags/nightly^{commit}" || echo none)
+          head=$(git rev-parse HEAD)
+          if [ "$last" = "$head" ] && [ "${{ github.event.inputs.force }}" != "true" ]; then
+            echo "main is unchanged since the last nightly ($head); skipping."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=nightly-$(date -u +%Y%m%d)-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+  # A nightly players can download must be as tested as a tagged release.
+  # wlyup writes to their game directory; shipping a broken one is worse than
+  # shipping none.
+  gate:
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: scripts/coverage.sh
+
+  build:
+    needs: [decide, gate]
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64, ext: ".exe" }
+          - { goos: windows, goarch: arm64, ext: ".exe" }
+          - { goos: linux,   goarch: amd64, ext: "" }
+          - { goos: linux,   goarch: arm64, ext: "" }
+          - { goos: darwin,  goarch: amd64, ext: "" }
+          - { goos: darwin,  goarch: arm64, ext: "" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          NAME="wlyup_${VERSION}_${GOOS}_${GOARCH}${{ matrix.ext }}"
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags="-s -w -buildid= -X weloveyou-mc/internal/buildinfo.version=${VERSION} -X weloveyou-mc/internal/buildinfo.commit=${GITHUB_SHA}" \
+            -o "dist/${NAME}" ./cmd/wlyup
+          (cd dist && sha256sum "${NAME}" > "${NAME}.sha256")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nightly-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 3
+
+  publish:
+    needs: [decide, build]
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create/replace the release and move the tag
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: staging
+          merge-multiple: true
+      - name: collect and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find staging -type f ! -name '*.sha256' -exec mv {} dist/ \;
+          (cd dist && sha256sum * > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - name: replace rolling nightly release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Roll the tag forward: delete the previous release and its tag, then
+          # recreate at this commit. --cleanup-tag removes the tag when a
+          # release owns it; the explicit push-delete is the backstop for a tag
+          # left behind by a partially failed run.
+          gh release delete nightly --cleanup-tag --yes 2>/dev/null || true
+          git push origin :refs/tags/nightly 2>/dev/null || true
+
+          NOTES=$(mktemp)
+          {
+            echo "Automated nightly build of the pack updater from \`main\` — **pre-release, not a stable version.**"
+            echo
+            echo "- Version: \`${VERSION}\`"
+            echo "- Commit: ${GITHUB_SHA}"
+            echo "- Built: $(date -u '+%Y-%m-%d %H:%M UTC')"
+            echo
+            echo "Binaries for every platform are attached, with a \`SHA256SUMS\` file."
+            echo "Builds use \`-trimpath\` and an empty \`-buildid\`, so rebuilding this"
+            echo "commit with the same Go version reproduces the same bytes."
+            echo
+            echo "\`wlyup\` rewrites your mods folder to match the published pack."
+            echo "Point it at a copy first if you have local changes you care about."
+          } > "$NOTES"
+
+          gh release create nightly dist/* \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            --title "wlyup nightly (${VERSION})" \
+            --notes-file "$NOTES"
