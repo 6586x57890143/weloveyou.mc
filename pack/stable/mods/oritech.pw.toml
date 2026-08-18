@@ -1,0 +1,13 @@
+name = "Oritech"
+filename = "oritech-fabric-1.21.1-1.2.10.jar"
+side = "both"
+
+[download]
+url = "https://cdn.modrinth.com/data/4sYI62kA/versions/QKdI8Kxf/oritech-fabric-1.21.1-1.2.10.jar"
+hash-format = "sha512"
+hash = "700f997e801c6a06e9b945782829b834db13d36d2e3411ffc21d70d8affd820651238814f6b1c51b2da9724350766f75df420ea964b76bf0fe1c30a90ac17469"
+
+[update]
+[update.modrinth]
+mod-id = "4sYI62kA"
+version = "QKdI8Kxf"

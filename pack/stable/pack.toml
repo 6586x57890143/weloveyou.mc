@@ -1,0 +1,13 @@
+name = "weloveyou"
+author = "kon"
+version = "0.1.0"
+pack-format = "packwiz:1.1.0"
+
+[index]
+file = "index.toml"
+hash-format = "sha256"
+hash = "6101e730b2019f1d417f7f45c59c188bd6d69e308a358bbba7f904360ddaa817"
+
+[versions]
+fabric = "0.19.3"
+minecraft = "1.21.1"
