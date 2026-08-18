@@ -45,7 +45,37 @@ services:
       # G1 with Aikar's tuning is the right default under a 16G heap. Any other
       # profile is JVM_XX_OPTS, never a code change — see BENCHMARKS.md.
       USE_AIKAR_FLAGS: "true"
-      JVM_XX_OPTS: "${MC_JVM_XX_OPTS:-}"
+      # Baseline from brucethemoose/Minecraft-Performance-Flags-Benchmarks, on
+      # top of Aikar's G1 tuning above. Every flag here was preflighted against
+      # this exact image with `java <flag> -version` on aarch64 rather than
+      # copied on faith — the guide is four years old and several of its flags
+      # target JDKs and CPUs that have moved on.
+      #
+      # Dropped from the published set: -XX:+UseNUMA, which fails to initialise
+      # libnuma on a single-node VM and warns on every boot for no benefit.
+      #
+      # UseCompactObjectHeaders is the one genuinely new lever (JEP 519,
+      # production in 25): 8-byte headers instead of 12/16. It matters most
+      # exactly here, where there are 2 cores to collect with and heap pressure
+      # is the binding constraint. It is still the first thing to A/B in
+      # jvm-profiles.toml — shipped on because it is a supported production
+      # feature, not because it has been measured on this pack.
+      JVM_XX_OPTS: >-
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+UnlockDiagnosticVMOptions
+        -XX:+AlwaysActAsServerClassMachine
+        -XX:+AlwaysPreTouch
+        -XX:+DisableExplicitGC
+        -XX:+PerfDisableSharedMem
+        -XX:+UseFastUnorderedTimeStamps
+        -XX:+UseCriticalJavaThreadPriority
+        -XX:ThreadPriorityPolicy=1
+        -XX:AllocatePrefetchStyle=3
+        -XX:+UseVectorCmov
+        -XX:NmethodSweepActivity=1
+        -XX:ReservedCodeCacheSize=400M
+        -XX:+UseCompactObjectHeaders
+        ${MC_JVM_XX_OPTS:-}
 
       ENABLE_RCON: "true"
       RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in deploy/.env}"
