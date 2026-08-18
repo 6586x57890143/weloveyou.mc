@@ -27,8 +27,8 @@ releases_channel = ""
 # service — no code change.
 [channels.stable]
 mc_version = "1.21.1"
-pack_url   = "https://6586x57890143.github.io/weloveyou-pack/pack/stable/pack.toml"
+pack_url   = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"
 
 # [channels.edge]
 # mc_version = "26.2"
-# pack_url   = "https://6586x57890143.github.io/weloveyou-pack/pack/edge/pack.toml"
+# pack_url   = "https://weloveyou-pack.pages.dev/pack/edge/pack.toml"
