@@ -52,6 +52,15 @@ services:
       ONLINE_MODE: "true"
       ENFORCE_WHITELIST: "true"
 
+      # Seeds only. EXISTING_WHITELIST_FILE is deliberately left at itzg's
+      # default of SKIP rather than SYNCHRONIZE: with SYNCHRONIZE the env var
+      # becomes authoritative and every restart discards names added at runtime
+      # — which would silently break the `/whitelist add` Discord command in
+      # phase 5, and lose anyone invited between deploys. So this seeds the file
+      # once and RCON owns it thereafter.
+      WHITELIST: "${MC_WHITELIST:-}"
+      OPS: "${MC_OPS:-}"
+
       # Watchdog stays on: this server is always-on and does not use autopause,
       # so a hung tick should kill the process rather than hang the players.
       OVERRIDE_SERVER_PROPERTIES: "true"
