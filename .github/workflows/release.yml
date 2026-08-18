@@ -237,10 +237,16 @@ jobs:
           set -euo pipefail
           test -n "${TS_AUTHKEY:-}" || { echo "::error::TS_AUTHKEY is not set"; exit 1; }
           sudo tailscaled --state=mem: --tun=userspace-networking --socks5-server=localhost:1055 &
-          # The key must be ephemeral and tagged. Ephemeral so this node removes
-          # itself when the run ends rather than accumulating dead machines, and
-          # tagged so the ACL can permit it to reach exactly one host on one port.
-          sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="gh-runner-${GITHUB_RUN_ID}" --accept-routes=false --accept-dns=false --ssh=false
+          # TS_AUTHKEY is an OAuth client secret, not a plain auth key: plain auth
+          # keys expire after at most 90 days, which would break deploys silently
+          # months from now. An OAuth client does not expire and mints a fresh
+          # ephemeral key per run.
+          #
+          # ?ephemeral=true so the node removes itself when the run ends rather
+          # than accumulating dead machines, and --advertise-tags so the ACL can
+          # permit it to reach exactly one host on one port. The tag is mandatory
+          # with OAuth: registration fails without it.
+          sudo tailscale up --auth-key="${TS_AUTHKEY}?ephemeral=true" --advertise-tags=tag:ci --hostname="gh-runner-${GITHUB_RUN_ID}" --accept-routes=false --accept-dns=false --ssh=false
           sudo tailscale status
 
       - name: deploy
