@@ -51,7 +51,10 @@ java25plus = [
 # it measures:
 #
 #   throughput   Chunky prints chunks/sec to the server log during pregeneration
-#   GC + alloc   JFR (-XX:StartFlightRecording), built into the JVM, every arch
+#   GC pauses    -Xlog:gc, parsed from the container log. Chosen over JFR after
+#                writing the driver: the pause distribution is the only thing
+#                the sweep needs from the collector, and a log line needs no
+#                recording lifecycle, no dump step and no jfr tool in the image.
 #   memory       docker stats for peak RSS
 #   ticks        the server's own tick timing in the log
 #

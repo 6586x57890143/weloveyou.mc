@@ -28,7 +28,9 @@ func run(args []string, out io.Writer) error {
 	case "version":
 		fmt.Fprintln(out, buildinfo.String("wly"))
 		return nil
-	case "", "serve", "bench":
+	case "bench":
+		return benchCmd(args[1:], out)
+	case "", "serve":
 		return fmt.Errorf("%q is not implemented yet (phase 0 skeleton)", cmd)
 	default:
 		return fmt.Errorf("unknown command %q; try: version | serve | bench", cmd)

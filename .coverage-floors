@@ -7,12 +7,19 @@
 # Targets from the plan, applied as each package lands:
 #   internal/packwiz  95   it deletes files on player machines
 #   internal/mcevents 95   pure parsing, no excuse for a gap
-#   internal/bench    90   a silent misparse invalidates every number
+#   internal/bench    90   a silent misparse invalidates every number  [met: 98]
 
-weloveyou-mc/cmd/wly              70
+# Lowered from 70 deliberately, and the total raised from 75 to 80 in the same
+# change. cmd/wly gained docker.go: a shell-out adapter with no decisions in it,
+# added so that the run orchestration could move into internal/bench and be
+# tested against a replayed log. The gate got stricter overall - the package
+# holding the logic is at 98 - while the package holding the I/O got thinner and
+# less coverable. That is the trade being recorded, not a red build made green.
+weloveyou-mc/cmd/wly              30
 weloveyou-mc/cmd/wlyup            70
+weloveyou-mc/internal/bench       98
 weloveyou-mc/internal/buildinfo   85
 
 # Across every package. Rises as the logic-heavy packages land; the plan's
 # destination is 85.
-total                             75
+total                             80
