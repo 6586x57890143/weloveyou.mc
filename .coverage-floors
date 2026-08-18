@@ -1,0 +1,18 @@
+# Per-package coverage floors, enforced by scripts/coverage.sh in CI.
+#
+# Ratchet-only: raise a floor when a package earns it, never lower one to make
+# a red build green. A package listed here that no longer exists is an error,
+# not a skip — that is how a deleted or renamed package gets noticed.
+#
+# Targets from the plan, applied as each package lands:
+#   internal/packwiz  95   it deletes files on player machines
+#   internal/mcevents 95   pure parsing, no excuse for a gap
+#   internal/bench    90   a silent misparse invalidates every number
+
+weloveyou-mc/cmd/wly              70
+weloveyou-mc/cmd/wlyup            70
+weloveyou-mc/internal/buildinfo   85
+
+# Across every package. Rises as the logic-heavy packages land; the plan's
+# destination is 85.
+total                             75

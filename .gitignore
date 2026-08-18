@@ -1,0 +1,15 @@
+# Build output
+/dist/
+/wly
+/wly.exe
+/wlyup
+/wlyup.exe
+coverage.out
+
+# Local runtime state — never committed
+/deploy/data/
+/deploy/.env
+*.local.toml
+
+# packwiz working files
+/pack/*/.packwizignore.local

@@ -1,0 +1,6 @@
+# Everything is LF in the repository. The CI runners and the container are
+# Linux; a CRLF shell script or Dockerfile fails there in ways that are
+# tedious to diagnose from a Windows checkout.
+* text=auto eol=lf
+*.png binary
+*.jar binary
