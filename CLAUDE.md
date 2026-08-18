@@ -95,6 +95,10 @@ of the few places the split costs something.
 
 - **Line endings are LF**, enforced by `.gitattributes`. A CRLF shell script or Dockerfile
   breaks the Linux runners in ways that are tedious to diagnose from a Windows checkout.
+- **Windows checkouts drop the executable bit.** A new script committed from here lands as
+  100644 and CI fails with `Permission denied` (exit 126). Fix with
+  `git update-index --chmod=+x scripts/<name>`, and check `git ls-files -s scripts/` before
+  pushing a new one.
 - **Write files with bash heredocs.** Python read_text/write_text use the Windows locale
   codec by default and will silently mangle every em-dash into a byte no UTF-8 parser
   accepts. If Python is unavoidable, pass `encoding="utf-8", newline="\n"`.
