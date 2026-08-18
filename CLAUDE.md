@@ -14,12 +14,16 @@ content. Split because the cadences differ: a pack release is weekly and touches
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phase 0 complete, phase 3 (client distribution) done in `weloveyou-pack`.**
-Nothing deployed. Next is phase 1, the benchmark harness.
+**Status: phases 0, 1 and 3 done.** The server is live and joinable; the pack
+publishes to Cloudflare Pages; `wly bench` exists and has never been run for
+real. Next is phase 2, the Discord design passes.
 
 ## Commands
 
 ```bash
+go run ./cmd/wly bench --dry-run          # preflight only, measures nothing
+go run ./cmd/wly bench --only j25-g1-coh --workload pack --runs 1
+
 go build ./...
 go test ./...
 go vet ./...
