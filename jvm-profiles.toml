@@ -1,0 +1,117 @@
+# Candidate JVM profiles for `wly bench`. Nothing here is believed until it has
+# a row in BENCHMARKS.md.
+#
+# Two dimensions, not one: the JDK and the flags. Minecraft 1.21.1 only requires
+# Java 21, but it runs happily on newer JDKs, and the single largest lever found
+# since the flag research everyone still cites — compact object headers, JEP 519
+# — does not exist before 25. Pinning to 21 because it is what the game asks for
+# would leave that on the table.
+#
+# Every profile is preflighted: wly runs `java <flags> -version` first and drops
+# whatever the JVM rejects, logging what it dropped. That is what keeps this file
+# honest across JDK bumps without anyone re-reading release notes.
+
+# ---------------------------------------------------------------------------
+# Running an older pack on a newer JDK
+# ---------------------------------------------------------------------------
+# The compatibility story is a known flag, not a gamble:
+#
+#   JDK 21  sun.misc.Unsafe memory access works
+#   JDK 24  --sun-misc-unsafe-memory-access=warn by default
+#   JDK 25  still warn — mods keep working, the log gets noisier
+#   JDK 26  DENY by default: it throws. Needs =allow explicitly.
+#   JDK 27+ removed outright, the flag is ignored. A real wall for 1.21.1-era mods.
+#
+# So 25 is cheap, 26 costs one flag, and 27 is where this stops being a decision
+# we get to make. The same applies to JNI: JEP 472 restricts native access, and
+# older natives (Netty, LWJGL paths) want it permitted explicitly.
+
+[compat]
+# Applied to every profile from java 25 up. These are launcher options, so they
+# belong in itzg's JVM_OPTS rather than JVM_XX_OPTS.
+java25plus = [
+    "--sun-misc-unsafe-memory-access=allow",
+    "--enable-native-access=ALL-UNNAMED",
+    "--illegal-native-access=allow",
+]
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+# `image` is the itzg tag. `xx` goes to JVM_XX_OPTS, `opts` to JVM_OPTS.
+# `aikar = true` leaves USE_AIKAR_FLAGS on; a profile that brings its own
+# collector must turn it off, since Aikar's set is G1-specific.
+
+[profiles.baseline-j21]
+description = "What ships today. The control every other row is measured against."
+image = "itzg/minecraft-server:java21"
+aikar = true
+
+[profiles.j25-g1]
+description = "Same collector, newer JDK. Isolates the cost or benefit of the JDK jump alone."
+image = "itzg/minecraft-server:java25"
+aikar = true
+
+[profiles.j25-g1-coh]
+description = """
+The headline candidate. Compact object headers went production in JDK 25 (JEP 519):
+8-byte headers instead of 12/16, ~22% less heap on SPECjbb and 10-20% less live data
+on small-object-heavy workloads. Minecraft is the archetypal small-object workload —
+FerriteCore exists because of exactly this problem — and I could find no published
+Minecraft numbers for it. This is the row worth running first.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = true
+xx = ["-XX:+UseCompactObjectHeaders"]
+
+[profiles.j25-zgc]
+description = """
+Generational ZGC. Expect this to lose under a 16G heap and only start paying off
+above it — the point of running it is to find where the crossover actually is on
+our box, not to confirm folklore. Non-generational mode is gone (JEP 490) and
+-XX:+ZGenerational is obsolete in 25, so most published ZGC advice is stale.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = false
+xx = ["-XX:+UseZGC", "-XX:+UseCompactObjectHeaders"]
+
+[profiles.j25-shenandoah-gen]
+description = """
+Generational Shenandoah, which shipped in JDK 24. The widely-repeated "Shenandoah
+kills server throughput" finding predates it entirely and deserves a fresh run.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = false
+xx = ["-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational", "-XX:+UseCompactObjectHeaders"]
+
+[profiles.j25-graalvm-g1-coh]
+description = """
+Oracle GraalVM's JIT, which used to be the paid tier and has been free under the
+GFTC since the JDK 17 release — so the old "20%+ on chunk generation, but you have
+to pay" caveat is gone. Chunk generation is exactly our workload, which makes this
+the second most interesting row after compact headers.
+"""
+image = "itzg/minecraft-server:java25-graalvm"
+aikar = true
+xx = ["-XX:+UseCompactObjectHeaders"]
+
+# ponytail: JDK 26 has no itzg tag yet, so this needs a custom image or a
+# JAVA_VERSION override before it can run. Left declared and disabled rather than
+# deleted, because the compat flags above are the whole reason it is reachable at
+# all, and forgetting that would be the expensive kind of tidy.
+[profiles.j26-g1-coh]
+description = "JDK 26. Requires --sun-misc-unsafe-memory-access=allow or mods throw."
+image = "itzg/minecraft-server:java26"   # does not exist yet
+aikar = true
+xx = ["-XX:+UseCompactObjectHeaders"]
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Not profiles, but worth measuring once each
+# ---------------------------------------------------------------------------
+# -XX:AOTCache (JEP 483/514/515) cuts JVM startup rather than steady-state TPS.
+# It matters for how fast the server comes back after a pack release, not for how
+# it plays, so it gets its own measurement rather than a row in the TPS table.
+#
+# Transparent huge pages: -XX:+UseTransparentHugePages. Worth a paired run against
+# the winning profile rather than doubling every row.

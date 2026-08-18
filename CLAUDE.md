@@ -138,6 +138,14 @@ Two rules that are easy to get wrong:
    loses on B is a finding, not noise.
 2. **Never benchmark on a GitHub-hosted runner.** They are noisy shared VMs; the numbers
    would be fiction. `bench.yml` targets `[self-hosted, bench]`.
+3. **The JDK is a dimension, not a constant.** 1.21.1 only requires Java 21, but compact
+   object headers need 25. Running an older pack on a newer JDK is deliberate here: `warn`
+   on 24/25, `deny` on 26 (fix with `--sun-misc-unsafe-memory-access=allow`), removed on 27+.
+   Trading slight instability for a measured gain is fine when the mitigation is a documented
+   flag; shipping an unmeasured profile because it sounds fast is not.
+
+`jvm-profiles.toml` holds the candidates. Nothing in it is believed until it has a row in
+`BENCHMARKS.md`.
 
 `wly bench` preflights every flag with `java <flags> -version` and drops what the JVM
 rejects, so a flag removed by a future JDK degrades instead of failing the boot.
