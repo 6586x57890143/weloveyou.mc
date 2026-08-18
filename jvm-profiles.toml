@@ -36,6 +36,28 @@ java25plus = [
 ]
 
 # ---------------------------------------------------------------------------
+# Instruments
+# ---------------------------------------------------------------------------
+# NOT spark. It is the obvious choice and it does not work here:
+#
+#   - spark 1.10.178 (current) declares minecraft ">=26.1" and will not load
+#     on 1.21.1 at all.
+#   - spark 1.10.109 is the newest 1.21.1 build, from September 2024, and its
+#     bundled async-profiler segfaults the JVM on Java 25 / aarch64:
+#     SIGSEGV at pc=0x0 in VMThread::nativeThreadId. Ten restart loops.
+#
+# So the instruments are ones that ship with the JDK and the pack instead, which
+# is better anyway — nothing to keep ported, and no mod that can crash the thing
+# it measures:
+#
+#   throughput   Chunky prints chunks/sec to the server log during pregeneration
+#   GC + alloc   JFR (-XX:StartFlightRecording), built into the JVM, every arch
+#   memory       docker stats for peak RSS
+#   ticks        the server's own tick timing in the log
+#
+# ponytail: JFR over spark, revisit if a 1.21.1-compatible spark appears
+
+# ---------------------------------------------------------------------------
 # Profiles
 # ---------------------------------------------------------------------------
 # `image` is the itzg tag. `xx` goes to JVM_XX_OPTS, `opts` to JVM_OPTS.
