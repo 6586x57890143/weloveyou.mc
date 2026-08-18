@@ -6,6 +6,11 @@ name: bench
 # one. Hosted runners are noisy shared VMs; Minecraft TPS numbers measured
 # there would be fiction, and a committed BENCHMARKS.md full of fiction is
 # worse than no file at all.
+# DO NOT ADD pull_request OR pull_request_target HERE.
+#
+# This repository is public and this job runs on a self-hosted runner. A PR
+# trigger would let anyone who opens a pull request execute code on the bench
+# box. ci.yml enforces this and will fail the build if it is ever added.
 on:
   workflow_dispatch:
     inputs:
