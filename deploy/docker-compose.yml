@@ -84,10 +84,9 @@ services:
 
       # Two lines, because the server list gives you two and wasting one is a
       # missed hello. Section signs are colour codes; the file is UTF-8 so the
-      # emoji survive. Single-quoted so the 
- stays two literal characters.
-      MOTD: '§d§l♥ we§f§llove§d§lyou §d♥  §8│ §7Fabric 1.21.1
-§7Terralith §8· §7Oritech §8· §8§obring a shovel'
+      # emoji survive. Single-quoted YAML so the escape stays two literal
+      # characters rather than becoming a real newline compose folds away.
+      MOTD: '§d§l♥ we§f§llove§d§lyou §d♥  §8│ §7Fabric 1.21.1\n§7Terralith §8· §7Oritech §8· §8§obring a shovel'
 
       # Seeds only. EXISTING_WHITELIST_FILE is deliberately left at itzg's
       # default of SKIP rather than SYNCHRONIZE: with SYNCHRONIZE the env var
