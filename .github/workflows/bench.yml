@@ -74,3 +74,16 @@ jobs:
           git push origin "$branch"
           gh pr create --fill --title "bench: JVM sweep $(date -u +%Y-%m-%d)" \
             --body "Automated sweep. Review the medians before merging; anything under ~5% is noise."
+
+      # Always, including on failure: a crashed sweep that leaves the box running
+      # costs more than the sweep did. An in-guest poweroff transitions the OCI
+      # instance to STOPPED, which is what actually stops the billing - only the
+      # boot volume is charged after that.
+      #
+      # A timer on the production box brings it back 15 minutes before the next
+      # scheduled sweep, and a nightly one stops it if this step never ran.
+      - name: power down the bench box
+        if: always()
+        run: |
+          echo "sweep finished; powering off to stop billing"
+          sudo shutdown -h +1 "bench sweep complete" || sudo poweroff

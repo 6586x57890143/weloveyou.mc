@@ -131,6 +131,45 @@ nothing to invent when it lands.
 Stop the bench box when it is not sweeping. Stopped instances bill only for the
 boot volume, so an idle bench box is pennies and a running one is not.
 
+## Provisioning another box
+
+`/opt/deploy/provision-box.sh <name> [ocpus] [memory-gb]` on the production box,
+which is where the OCI credential lives. One command, and it encodes the thing
+that cost an afternoon to learn:
+
+**A1 is almost always "Out of host capacity" for a NEW instance** — all three
+Frankfurt ADs refused — **but A2 has capacity, and converting an existing A2 to
+A1 succeeds.** So the script launches A1 first, falls back to A2, and converts.
+
+The conversion needs a stopped instance and is asynchronous: for a minute or two
+afterwards the instance still reports the old shape and START returns "currently
+being modified". That is not a failure; retry until it settles.
+
+Convert rather than stay on A2 because the shapes are different machines. A1 is
+Neoverse-N1 with one vCPU per OCPU; A2 is AmpereOne with two. A bench box on
+different silicon with twice the threads measures a server we do not ship, and
+GC choices hinge on spare cores more than anything else.
+
+Manual equivalent of the conversion step:
+
+```bash
+oci compute instance action --instance-id <ocid> --action SOFTSTOP --wait-for-state STOPPED
+oci compute instance update --instance-id <ocid> --shape VM.Standard.A1.Flex   --shape-config '{"ocpus":2,"memoryInGBs":12}' --force
+oci compute instance action --instance-id <ocid> --action START   # retry while "being modified"
+```
+
+## The bench box costs money when it runs
+
+`/opt/deploy/bench-power.sh start|stop|status`. Three things keep it cheap:
+
+- `bench.yml` powers the box off as its last step, `if: always()`, so a crashed
+  sweep does not bill for a week. An in-guest poweroff moves the OCI instance to
+  STOPPED, which is what stops billing — only the boot volume is charged then.
+- `wly-bench-up.timer` starts it Mondays 03:45 UTC, before the 04:00 sweep. A
+  stopped runner means GitHub queues the job rather than running it.
+- `wly-bench-idle.timer` stops it nightly at 23:30 UTC, in case the sweep never
+  reached its own power-off step.
+
 ## Cross-repo contract
 
 `wly.toml` carries each channel's `pack_url` so the daemon can poll it for releases.
