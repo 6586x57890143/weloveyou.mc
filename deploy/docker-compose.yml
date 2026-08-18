@@ -66,9 +66,14 @@ services:
     image: "${WLY_IMAGE:-ghcr.io/6586x57890143/weloveyou.mc:latest}"
     container_name: wly
     restart: unless-stopped
+    # service_started, not service_healthy. `compose up -d` blocks on a
+    # service_healthy dependency, and mc's healthcheck has a 5 minute start
+    # period while it downloads the pack — which would stall every deploy behind
+    # it and fail the run outright on a cold first boot. wly retries RCON anyway,
+    # so it does not need mc to be ready, only to exist.
     depends_on:
       mc:
-        condition: service_healthy
+        condition: service_started
 
     read_only: true
     cap_drop: ["ALL"]
