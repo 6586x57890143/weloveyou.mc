@@ -11,9 +11,10 @@ tiles_dir = "/mc/squaremap/web/tiles"
 # Container to restart when a pack release lands.
 container = "wly-mc"
 
-[r2]
-endpoint = "https://<account>.r2.cloudflarestorage.com"
-bucket   = "weloveyou-mc"
+# No object storage for now. The pack is served from GitHub Pages and the map
+# will be served by squaremap's own webserver on this box, so there is nothing
+# left for R2 to do. Revisit if the VPS struggles to serve tiles — a Cloudflare
+# proxy in front of it is the cheaper next step than moving the files.
 
 [discord]
 guild_id = ""
@@ -26,8 +27,8 @@ releases_channel = ""
 # service — no code change.
 [channels.stable]
 mc_version = "1.21.1"
-pack_url   = "https://pack.example.com/stable/pack.toml"
+pack_url   = "https://6586x57890143.github.io/weloveyou-pack/pack/stable/pack.toml"
 
 # [channels.edge]
 # mc_version = "26.2"
-# pack_url   = "https://pack.example.com/edge/pack.toml"
+# pack_url   = "https://6586x57890143.github.io/weloveyou-pack/pack/edge/pack.toml"
