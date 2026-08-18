@@ -66,6 +66,11 @@ services:
     image: "${WLY_IMAGE:-ghcr.io/6586x57890143/weloveyou.mc:latest}"
     container_name: wly
     restart: unless-stopped
+    # Opt-in until the daemon does something. `wly serve` is a phase-0 skeleton
+    # that exits immediately, so starting it by default would just restart-loop
+    # and make every deploy look broken. Start it with:
+    #   docker compose --profile bot up -d
+    profiles: ["bot"]
     # service_started, not service_healthy. `compose up -d` blocks on a
     # service_healthy dependency, and mc's healthcheck has a 5 minute start
     # period while it downloads the pack — which would stall every deploy behind
@@ -84,9 +89,9 @@ services:
     environment:
       WLY_CONFIG: /config/wly.toml
       WLY_RCON_PASSWORD: "${RCON_PASSWORD:?}"
-      WLY_DISCORD_TOKEN: "${WLY_DISCORD_TOKEN:?set WLY_DISCORD_TOKEN in deploy/.env}"
-      WLY_R2_ACCESS_KEY: "${WLY_R2_ACCESS_KEY:?}"
-      WLY_R2_SECRET_KEY: "${WLY_R2_SECRET_KEY:?}"
+      WLY_DISCORD_TOKEN: "${WLY_DISCORD_TOKEN:-}"
+      WLY_R2_ACCESS_KEY: "${WLY_R2_ACCESS_KEY:-}"
+      WLY_R2_SECRET_KEY: "${WLY_R2_SECRET_KEY:-}"
 
     volumes:
       - ../wly.toml:/config/wly.toml:ro
