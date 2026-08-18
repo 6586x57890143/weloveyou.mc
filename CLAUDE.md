@@ -11,6 +11,11 @@ Discord bot that is the entire front-end, and a squaremap live map served from C
 Prism instance templates, and their publishing pipeline. This repo ships code; that one ships
 content. Split because the cadences differ: a pack release is weekly and touches no Go.
 
+**Start with [HANDOFF.md](HANDOFF.md)** if you are picking this up cold. It has
+the live state, how a change reaches players, the traps that have already cost
+time, and what is next. This file is the working reference; that one is the
+orientation.
+
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 

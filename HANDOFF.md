@@ -1,0 +1,145 @@
+# Handoff
+
+Written so a fresh session can pick this up cold. Current as of **v0.2.0**,
+2026-08-18. If something here disagrees with reality, reality is right and this
+file is stale — check the live state first with the commands below.
+
+## What exists right now
+
+A joinable modded Minecraft server, a pack that publishes itself, and a
+benchmark harness that has never been run for real.
+
+| Thing | Where | State |
+|---|---|---|
+| Server | `weloveyou` @ `100.103.121.9` (tailnet), public `158.180.53.71` | live, healthy, whitelisted |
+| Pack | `weloveyou-pack.pages.dev/pack/stable/` | published, v0.1.4 |
+| Platform repo | `github.com/6586x57890143/weloveyou.mc` | public, v0.2.0 |
+| Pack repo | `github.com/6586x57890143/weloveyou-pack` | public |
+| Bench box | `weloveyou-bench`, A1 2 OCPU/12 GB | **STOPPED** on purpose |
+| Spend | `/var/lib/wly/cost.json` on the server | ~€0.03/day |
+
+Minecraft 1.21.1, Fabric, Java 25, 17 pack entries, 87 mods loaded server-side.
+
+## Check the live state in one go
+
+```bash
+ssh -i ~/.ssh/oracle-weloveyou ubuntu@100.103.121.9 '
+  sudo -u deploy git -C /srv/app describe --tags
+  sudo docker ps --filter name=wly-mc --format "{{.Status}}"
+  /opt/deploy/bench-power.sh status
+  cat /var/lib/wly/cost.json'
+curl -s https://weloveyou-pack.pages.dev/pack/stable/pack.toml | head -3
+```
+
+## How a change reaches players
+
+Two repos, two pipelines, and they meet at a URL rather than at a deploy.
+
+```
+weloveyou.mc     tag v* -> build -> GHCR -> tailnet -> forced command -> /srv/app -> compose up
+weloveyou-pack   tag stable-v* -> validate -> deps -> smoke boot -> wrangler -> Pages
+                                                                        |
+                              server fetches PACKWIZ_URL on restart <---+
+                              Prism fetches the same URL on launch  <---+
+```
+
+A pack release deploys nothing. The server picks it up on its next restart and
+players on their next launch. That is the whole point of the split.
+
+**Tagging** (annotated only — `--verify-tag` rejects lightweight tags):
+
+```bash
+git tag -a v0.2.1 -m "..."          && git push origin v0.2.1        # platform
+git tag -a stable-v0.1.5 -m "..."   && git push origin stable-v0.1.5 # pack
+```
+
+The pack's channel is parsed out of the tag, so `stable-v*` not `v*`.
+
+## The invariant that keeps biting
+
+**A mod's `side` must be right, and nothing structural can tell you it is.**
+`pack-check.sh` proves a side is *declared*. Whether it is *correct* depends on
+what other mods need, which only booting reveals. Four bugs shipped on day one
+this way:
+
+- Oritech hard-depends on athena, which Modrinth marks client-only → server died
+- Terralith depends on lithostitched, which we shipped server-only → client died
+- C2ME wants java >=25; Prism gives clients 21 → client died
+- Spark's async-profiler segfaults the JVM on Java 25/aarch64 → ten restart loops
+
+Three gates now catch these, all in the pack repo's CI:
+
+- `scripts/pack-check.sh` — every entry declares a side, index is fresh
+- `scripts/deps-check.py` — every declared dependency is satisfied *per side*,
+  descending into nested jars (Fabric API bundles, and C2ME hides its java
+  requirement inside `c2me-opts-natives-math`)
+- `scripts/smoke-boot.sh` — boots a real Java 25 server and requires `Done (`
+
+Each was verified by reverting the real bug and watching it fail.
+
+## Things that will surprise you
+
+- **Oracle Always Free is 2 OCPU / 12 GB**, halved 2026-06-15 with no
+  announcement. The production box alone is the whole allowance; the bench box
+  is on credits.
+- **A1 has no capacity for new instances** in any Frankfurt AD, but **A2 does,
+  and converting an A2 to A1 works.** `/opt/deploy/provision-box.sh` does this.
+  The conversion is asynchronous and reports the old shape while it lands, which
+  looks exactly like a failure.
+- **Stopping an OCI instance is a small gamble** on getting it back.
+- **Both repos are public** so Actions is free — and `weloveyou.mc` has a
+  self-hosted runner. That is safe only because nothing a fork can trigger
+  targets it. `scripts/check-runners.py` enforces it. Never add `pull_request`
+  to `bench.yml`.
+- **Writing files from Windows**: use bash heredocs. Python's `write_text` uses
+  the locale codec and mangles em-dashes into bytes no YAML parser accepts; it
+  cost two broken pushes. Backticks in `git commit -m "..."` get shell-expanded
+  — use `git commit -F -` with a quoted heredoc.
+- **The exec bit does not survive a Windows checkout.** New scripts need
+  `git update-index --chmod=+x`.
+
+## Where phase 1 actually stands
+
+`wly bench` is written and tested (98.8% on `internal/bench`) but **has never
+produced a number**. The open question it exists to answer:
+
+> Does `-XX:+UseCompactObjectHeaders` help a modded Minecraft server? JEP 519
+> went production in JDK 25, claims 22% less heap on SPECjbb, and Minecraft is
+> the archetypal small-object workload — FerriteCore exists because of it. No
+> published Minecraft numbers exist that I could find.
+
+It ships **on** in production today because it is a supported production
+feature, not because it has been measured here. That is the first row to fill.
+
+To run the sweep:
+
+```bash
+ssh -i ~/.ssh/oracle-weloveyou ubuntu@100.103.121.9 '/opt/deploy/bench-power.sh start'
+gh workflow run bench -R 6586x57890143/weloveyou.mc -f workload=both -f runs=3
+# the sweep powers the box off when it finishes, always, including on failure
+```
+
+Expect ZGC to lose: it costs 10-15% CPU and there are two cores.
+
+## What is next
+
+Phase 2, **the Discord design passes**, and it is deliberately not code. Five
+surfaces need mockups before any bot is written, the get-started card first
+because it is where a new player either joins or gives up. The plan asks for
+2-3 distinct directions and real user input on each.
+
+Then phases 4-6: `internal/packwiz` (Load + Diff only), `internal/mcevents`,
+then `cmd/wly serve` — the bot, the event bridge, the status board.
+
+`wly serve` is still a stub that exits immediately, which is why the `wly`
+service sits behind a `bot` compose profile and does not start.
+
+**One standing requirement:** `wly`'s daily push must include a spend line from
+`/var/lib/wly/cost.json`. Credits drain quietly and the first symptom would be
+a stopped server.
+
+## The plan
+
+`~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md` is the source of
+truth for intent and phase order. It is long but it explains *why* for every
+decision here, including the ones that were reversed.
