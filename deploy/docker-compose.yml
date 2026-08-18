@@ -63,7 +63,7 @@ services:
       options: { max-size: "20m", max-file: "5" }
 
   wly:
-    image: "${WLY_IMAGE:-ghcr.io/weloveyou/weloveyou.mc:latest}"
+    image: "${WLY_IMAGE:-ghcr.io/6586x57890143/weloveyou.mc:latest}"
     container_name: wly
     restart: unless-stopped
     depends_on:

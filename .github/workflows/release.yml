@@ -196,24 +196,83 @@ jobs:
 
   # Only wly and compose changes reach the box. A pack release does not deploy
   # anything: the pack lives in R2 and wly restarts the server to pick it up.
+  #
+  # The box is reachable only over the tailnet — its deploy key carries
+  # from="100.64.0.0/10,...", so a connection from a public runner IP is refused
+  # even with the right key. So the runner joins the tailnet, deploys, and leaves.
+  #
+  # What the runner can actually do on the box is deliberately tiny: the deploy
+  # key is a forced command, so this SSH invocation cannot run anything except
+  # /opt/deploy/deploy.sh, which accepts "deploy [ref]" and nothing else. Even a
+  # fully compromised workflow cannot get a shell there.
   deploy:
     name: deploy to the server
     needs: [publish, image]
     runs-on: ubuntu-latest
-    # Set DEPLOY_HOST/DEPLOY_USER as variables and DEPLOY_SSH_KEY as a secret to
-    # arm this. Without them it is skipped rather than failed, so the first few
-    # releases can happen before a box exists.
+    # Skipped rather than failed when the box is not configured, so early
+    # releases can happen before any of this exists.
     if: vars.DEPLOY_HOST != ''
     environment: production
     steps:
-      - name: ssh and roll forward
+      # Tailscale's own apt repository, verified by their signing key — not a
+      # third-party action. This workflow holds contents:write and packages:write,
+      # so everything it runs is part of this project's supply chain.
+      - name: install tailscale
+        run: |
+          set -euo pipefail
+          codename=$(lsb_release -cs)
+          base="https://pkgs.tailscale.com/stable/ubuntu"
+          curl -fsSL "$base/${codename}.noarmor.gpg" | sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null
+          curl -fsSL "$base/${codename}.tailscale-keyring.list" | sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tailscale
+          tailscale --version
+
+      # userspace-networking avoids needing a TUN device or NET_ADMIN, and
+      # --state=mem: keeps the node identity off the runner disk entirely.
+      - name: join the tailnet
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          test -n "${TS_AUTHKEY:-}" || { echo "::error::TS_AUTHKEY is not set"; exit 1; }
+          sudo tailscaled --state=mem: --tun=userspace-networking --socks5-server=localhost:1055 &
+          # The key must be ephemeral and tagged. Ephemeral so this node removes
+          # itself when the run ends rather than accumulating dead machines, and
+          # tagged so the ACL can permit it to reach exactly one host on one port.
+          sudo tailscale up --authkey="$TS_AUTHKEY" --hostname="gh-runner-${GITHUB_RUN_ID}" --accept-routes=false --accept-dns=false --ssh=false
+          sudo tailscale status
+
+      - name: deploy
         env:
           KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           HOST: ${{ vars.DEPLOY_HOST }}
           USER: ${{ vars.DEPLOY_USER }}
         run: |
           set -euo pipefail
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           install -m 600 /dev/null key
-          printf '%s\n' "$KEY" > key
-          ssh -i key -o StrictHostKeyChecking=accept-new "$USER@$HOST" \
-            'cd ~/weloveyou.mc && git pull --ff-only && docker compose -f deploy/docker-compose.yml pull && docker compose -f deploy/docker-compose.yml up -d'
+          install -m 600 /dev/null known_hosts
+          echo "$KEY" > key
+          echo "$KNOWN_HOSTS" > known_hosts
+
+          # StrictHostKeyChecking=yes, never accept-new: this runs unattended
+          # against a box that can restart the game server, so an unrecognised
+          # host key must abort rather than be trusted on faith.
+          #
+          # `tailscale nc` rather than netcat with -X 5: it is guaranteed present
+          # alongside tailscaled and needs no assumption about which netcat the
+          # runner image ships.
+          ssh -i key \
+              -o UserKnownHostsFile=known_hosts \
+              -o StrictHostKeyChecking=yes \
+              -o ProxyCommand="sudo tailscale nc %h %p" \
+              -o ConnectTimeout=30 \
+              "${USER}@${HOST}" "deploy ${TAG}"
+
+      # Ephemeral keys expire on their own, but logging out makes the node
+      # disappear immediately rather than after Tailscale's timeout.
+      - name: leave the tailnet
+        if: always()
+        run: sudo tailscale logout || true

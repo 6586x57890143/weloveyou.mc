@@ -81,6 +81,34 @@ deliberately no authenticated write path at the edge.
 - **Pack releases never deploy anything.** The pack lives in R2; the server fetches it via
   `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
 
+## Deployment
+
+The box is an Oracle ARM VM (`weloveyou`, aarch64, 2 cores, 11G) reachable only over the
+tailnet at `100.103.121.9`. `release.yml` builds a multi-arch image, pushes it to GHCR, joins
+the tailnet with an ephemeral tagged auth key, and SSHes one command.
+
+**What CI can do on that box is deliberately tiny.** The `deploy` user's key is a forced
+command (`command="/opt/deploy/deploy.sh"`, `restrict`, `from="100.64.0.0/10,fd7a:...::/48"`),
+so the SSH invocation cannot run anything but that script, which accepts `deploy [ref]` and
+rejects everything else by regex. The privileged half is a separate root-owned script taking
+no arguments, reachable through a single-command sudoers rule, so the compose file path cannot
+be influenced by the caller. Verified: `rm -rf /`, `deploy ../../etc/passwd` and
+`deploy $(whoami)` are all refused.
+
+```
+/opt/deploy/config           REPO_URL, APP_DIR=/srv/app, COMPOSE_FILE=deploy/docker-compose.yml
+/opt/deploy/deploy.sh        forced command: parses a ref, git checkout, calls compose-up.sh,
+                             rolls back to the previous SHA if compose fails
+/opt/deploy/compose-up.sh    root half: pull --ignore-buildable, then up -d --build
+/srv/app                     the checkout, cloned via a read-only GitHub deploy key
+/srv/app/deploy/.env         secrets. gitignored, so `git checkout --force` never touches it.
+```
+
+Rolling back is `WLY_IMAGE=ghcr.io/…:vX.Y.Z` in `.env` plus a redeploy — no rebuild, no revert.
+
+`docker compose pull` runs before `up` because `up` alone will happily keep a stale local
+image that shares a tag with a newer remote one, which would make a deploy silently do nothing.
+
 ## Cross-repo contract
 
 `wly.toml` carries each channel's `pack_url` so the daemon can poll it for releases.
