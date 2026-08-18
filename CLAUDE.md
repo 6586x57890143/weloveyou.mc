@@ -109,6 +109,28 @@ Rolling back is `WLY_IMAGE=ghcr.io/…:vX.Y.Z` in `.env` plus a redeploy — no 
 `docker compose pull` runs before `up` because `up` alone will happily keep a stale local
 image that shares a tag with a newer remote one, which would make a deploy silently do nothing.
 
+## Spend
+
+Oracle is no longer free here: Always Free was halved to 2 OCPU / 12 GB on
+2026-06-15, which the production box alone consumes. The bench box runs on
+credits.
+
+A systemd timer on the production box writes `/var/lib/wly/cost.json` daily at
+06:30 UTC via `/opt/deploy/cost-report.sh`:
+
+```json
+{"generated": "...", "yesterday": 0.0338, "month_to_date": 0.0338,
+ "by_service": {"compute": 0.0338}}
+```
+
+**wly must surface this in its push notifications** — a spend line in the daily
+Discord message. Credits run out quietly otherwise, and the first sign would be
+a stopped server. The file exists before the bot does precisely so the bot has
+nothing to invent when it lands.
+
+Stop the bench box when it is not sweeping. Stopped instances bill only for the
+boot volume, so an idle bench box is pennies and a running one is not.
+
 ## Cross-repo contract
 
 `wly.toml` carries each channel's `pack_url` so the daemon can poll it for releases.
