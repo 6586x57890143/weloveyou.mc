@@ -108,10 +108,16 @@ jobs:
             exit 1
           fi
           # provision-box.sh installs the tailscale package but never
-          # authenticates it, which is why this box was unreachable. --ssh so
-          # the tailnet is enough on its own; no public port has to open.
+          # authenticates it, which is why this box was unreachable.
+          #
+          # Deliberately NOT --ssh. Tailscale SSH takes over port 22 on the
+          # tailnet address and enforces the tailnet ACL, which refuses tagged
+          # nodes by default: "tailnet policy does not permit you to SSH to this
+          # node". Plain sshd already accepts the key seeded into
+          # authorized_keys at provision time, so the tailnet only needs to
+          # provide the route, not the authentication.
           sudo tailscale up --authkey "$TS_AUTHKEY" --hostname weloveyou-bench \
-            --advertise-tags=tag:ci --ssh --accept-dns=false
+            --advertise-tags=tag:ci --ssh=false --accept-dns=false
           echo "joined as: $(tailscale ip -4 2>/dev/null | head -1)"
           {
             echo "### bench box joined the tailnet"
