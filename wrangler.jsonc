@@ -1,0 +1,22 @@
+{
+  // The published benchmark results.
+  //
+  // Workers Static Assets rather than Pages. Cloudflare now recommends Workers
+  // for all new projects and wrangler says so in its own error message; more
+  // usefully for us, a static-assets Worker needs no project to exist first.
+  // The Pages path failed with 'The Pages project "weloveyou-bench" does not
+  // exist' because `pages project create` had quietly failed behind a
+  // `|| true`, which is a whole class of failure this removes rather than
+  // patches.
+  //
+  // No "main": there is no Worker script. The site is a single rendered page
+  // plus the JSON it was rendered from, and adding a script to serve files that
+  // the platform already serves would be work for its own sake.
+  "name": "weloveyou-bench",
+  "compatibility_date": "2026-08-19",
+  "assets": {
+    // Written by scripts/bench-site.py, and gitignored — the source of truth is
+    // BENCHMARKS.json in the repository, not the rendered output.
+    "directory": "./site"
+  }
+}
