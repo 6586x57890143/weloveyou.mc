@@ -57,14 +57,29 @@ jobs:
             swapon --show || echo "(no swap configured)"
 
             echo
-            echo "## the question: was anything OOM-killed, ever?"
-            n=$(sudo journalctl -k --no-pager 2>/dev/null | grep -ciE 'out of memory|oom-kill|killed process' || true)
-            echo "kernel OOM lines: ${n:-0}"
-            sudo journalctl -k --no-pager 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -10 || true
+            echo "## is the journal even persistent across boots?"
+            # This decides whether anything below can answer the question at
+            # all. Cloud images often keep the journal in /run, which means a
+            # reboot erases exactly the evidence a crash leaves behind.
+            sudo journalctl --list-boots --no-pager 2>/dev/null | tail -8 || echo "(no boot list)"
+            ls -d /var/log/journal 2>/dev/null && echo "journal is persistent" || echo "JOURNAL IS VOLATILE - previous boots are gone"
 
             echo
-            echo "## kernel messages around the crash window"
-            sudo journalctl -k --no-pager --since '2026-08-19 14:15' --until '2026-08-19 14:35' 2>/dev/null | tail -40 || true
+            echo "## the question: was anything OOM-killed, in ANY boot?"
+            # _TRANSPORT=kernel rather than -k: `-k` implies `-b`, so it would
+            # only ever search the CURRENT boot — and this box rebooted after
+            # the crash. That would report a reassuring zero and prove nothing.
+            n=$(sudo journalctl _TRANSPORT=kernel --no-pager 2>/dev/null | grep -ciE 'out of memory|oom-kill|killed process' || true)
+            echo "kernel OOM lines across all retained boots: ${n:-0}"
+            sudo journalctl _TRANSPORT=kernel --no-pager 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -10 || true
+
+            echo
+            echo "## everything around the crash window, any boot, any unit"
+            sudo journalctl --no-pager --since '2026-08-19 14:15' --until '2026-08-19 14:35' 2>/dev/null | tail -60 || true
+
+            echo
+            echo "## the previous boot's tail - how did it end?"
+            sudo journalctl -b -1 --no-pager 2>/dev/null | tail -30 || echo "(no previous boot retained)"
 
             echo
             echo "## why did the runner stop?"
