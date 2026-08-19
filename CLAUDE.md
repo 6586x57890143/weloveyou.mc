@@ -260,11 +260,22 @@ Two rules that are easy to get wrong:
    Trading slight instability for a measured gain is fine when the mitigation is a documented
    flag; shipping an unmeasured profile because it sounds fast is not.
 
-4. **The pack is a skeleton and will grow.** Today's `pack/stable` is Terralith, Oritech and
+4. **The bench box must be boring, and Ubuntu's defaults are not.**
+   `apt-daily.timer` and `apt-daily-upgrade.timer` are `OnCalendar=6:00` with
+   `Persistent=true`. A box powered off except when sweeping therefore fires the
+   *missed* 06:00 run shortly after every boot — which is precisely when a sweep is
+   running. Measured: booted 13:52, `apt-daily-upgrade` started 14:22:57, sweep
+   cancelled 14:25:25, and that run consumed **4min 7s of CPU on two cores**.
+   The cancelled job was the visible half; the invisible half is a profile measured
+   against apt using both cores, which yields a plausible and wrong number.
+   Masked via `bench-admin.yml -> quiet-timers`; re-run it after reprovisioning,
+   because `provision-box.sh` is not version controlled. `sysstat-collect` is left
+   alone on purpose — ten-minutely CPU history is evidence, not noise.
+5. **The pack is a skeleton and will grow.** Today's `pack/stable` is Terralith, Oritech and
    perf mods; gameplay mods are still to come. A workload-B number is only comparable to
    another taken against a similar pack, so the report prints the mod count it measured and
    says so. Do not compare a row from today against one taken after the pack doubles.
-5. **The sweep is two passes.** 18 profiles at full radius and 3 repeats is roughly 50 hours
+6. **The sweep is two passes.** 18 profiles at full radius and 3 repeats is roughly 50 hours
    of a box that bills by the hour. Screen the whole matrix at `--runs 1 --radius 500` into
    `BENCHMARKS-screening.md`, then confirm the top few at full depth into `BENCHMARKS.md`.
    A screening run has no variance to report, so the two files are never comparable.

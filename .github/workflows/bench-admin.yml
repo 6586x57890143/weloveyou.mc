@@ -26,6 +26,11 @@ on:
           # Joins the tailnet so the box can be reached directly, which makes
           # every future diagnosis an ssh away instead of a workflow run.
           - tailscale-up
+          # Masks the timers that would otherwise run apt in the middle of a
+          # measurement. Re-run after reprovisioning; provision-box.sh lives on
+          # the production box and is not version controlled, so this is the
+          # only copy of the fix that survives.
+          - quiet-timers
 
 permissions:
   contents: read
@@ -123,4 +128,38 @@ jobs:
             echo "### bench box joined the tailnet"
             echo
             echo "- address: \`$(tailscale ip -4 2>/dev/null | head -1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # A benchmark box has to be boring. This one was not.
+      #
+      # apt-daily.timer and apt-daily-upgrade.timer are OnCalendar=6:00 with
+      # Persistent=true, so a box that is powered off except when sweeping fires
+      # the MISSED 06:00 run shortly after every boot — which is exactly when a
+      # sweep is running. On 2026-08-19 the box booted at 13:52, apt-daily-
+      # upgrade started at 14:22:57, and the sweep was cancelled at 14:25:25.
+      # That run consumed 4min 7s of CPU on a two-core machine.
+      #
+      # The cancelled job is the visible half. The invisible half is worse: any
+      # profile measured while apt is using both cores produces a number that
+      # looks perfectly reasonable and is wrong.
+      - name: quiet the timers that ruin measurements
+        if: github.event.inputs.action == 'quiet-timers'
+        run: |
+          set -euo pipefail
+          sudo systemctl mask --now \
+            apt-daily.timer apt-daily-upgrade.timer unattended-upgrades.service \
+            motd-news.timer update-notifier-motd.timer fwupd-refresh.timer ua-timer.timer
+          echo "masked. remaining timers:"
+          systemctl list-timers --no-pager | head -8
+          {
+            echo "### bench box quietened"
+            echo
+            echo "Masked apt-daily, apt-daily-upgrade, unattended-upgrades and the motd/fwupd/ua timers."
+            echo
+            echo "sysstat-collect is deliberately left running — ten-minutely CPU history is"
+            echo "evidence, not noise, and it is what would corroborate the next anomaly."
+            echo
+            echo '```'
+            systemctl list-timers --no-pager | head -8
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
