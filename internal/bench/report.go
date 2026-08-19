@@ -29,8 +29,15 @@ func Render(results []Result, host string, when time.Time) string {
 		}
 		fmt.Fprintf(&b, "## %s\n\n", workloadTitle(w))
 		if n := modsOf(rows); n > 0 {
-			fmt.Fprintf(&b, "%d mods loaded. Rows are only comparable to other runs "+
-				"against a similar pack — this one grows.\n\n", n)
+			// The caveat is about the pack growing, so it belongs only on the
+			// pack workload. The control's count is Fabric API's nested jars
+			// plus the pregenerator and does not move on its own.
+			if w == WorkloadPack {
+				fmt.Fprintf(&b, "%d mods loaded. Rows are only comparable to other runs "+
+					"against a similar pack — this one grows.\n\n", n)
+			} else {
+				fmt.Fprintf(&b, "%d mods loaded (Fabric API and the pregenerator).\n\n", n)
+			}
 		}
 		b.WriteString("| profile | chunks/s | vs base | peak RSS | startup | GC p99 |\n")
 		b.WriteString("|---|---:|---:|---:|---:|---:|\n")

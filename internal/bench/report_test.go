@@ -171,3 +171,21 @@ func TestRenderOmitsModCountWhenUnknown(t *testing.T) {
 		t.Errorf("report invented a mod count:\n%s", out)
 	}
 }
+
+func TestRenderDoesNotWarnAboutPackGrowthOnTheControl(t *testing.T) {
+	// The control's mod count is Fabric API's nested jars plus the
+	// pregenerator; it does not grow with the pack, so the caveat would be
+	// wrong there. The first real sweep printed it under Workload A.
+	res := []Result{{
+		Profile:  Baseline,
+		Workload: WorkloadVanilla,
+		Runs:     []Run{{Chunks: 100, Mods: 43, Elapsed: time.Second}},
+	}}
+	out := Render(res, "h", time.Unix(0, 0))
+	if !strings.Contains(out, "43 mods loaded") {
+		t.Errorf("control should still state its count:\n%s", out)
+	}
+	if strings.Contains(out, "this one grows") {
+		t.Errorf("the pack-growth caveat does not belong on the control:\n%s", out)
+	}
+}
