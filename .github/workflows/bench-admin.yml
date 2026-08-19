@@ -1,0 +1,105 @@
+name: bench-admin
+
+# One-off maintenance on the bench box, run by hand.
+#
+# The bench box has no public SSH (port 22 is closed) and is not on the tailnet,
+# so the self-hosted runner is the only channel that reaches it. That is fine for
+# occasional administration and deliberately awkward for anything else: this
+# workflow is workflow_dispatch only, and every action it can take is an explicit
+# choice in the list below rather than a free-form command.
+#
+# DO NOT ADD pull_request HERE, for the same reason bench.yml must not have it:
+# this repository is public and this job runs on a self-hosted runner.
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "What to do on the bench box"
+        required: true
+        default: diagnose
+        type: choice
+        options:
+          # Read-only. Answers "why did the sweep die" with log lines rather
+          # than theories: OOM kills, panics, reboots, and the memory headroom
+          # that was actually available.
+          - diagnose
+          # Joins the tailnet so the box can be reached directly, which makes
+          # every future diagnosis an ssh away instead of a workflow run.
+          - tailscale-up
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench
+  cancel-in-progress: false
+
+jobs:
+  admin:
+    name: ${{ github.event.inputs.action }}
+    runs-on: [self-hosted, bench]
+    timeout-minutes: 15
+    steps:
+      - name: diagnose
+        if: github.event.inputs.action == 'diagnose'
+        run: |
+          echo "### bench box diagnosis" >> "$GITHUB_STEP_SUMMARY"
+          exec 2>&1
+          {
+            echo "## uptime and boot history"
+            uptime
+            who -b || true
+            last -x reboot shutdown 2>/dev/null | head -8 || true
+
+            echo
+            echo "## memory and swap"
+            free -m
+            swapon --show || echo "(no swap configured)"
+
+            echo
+            echo "## the question: was anything OOM-killed, ever?"
+            n=$(sudo journalctl -k --no-pager 2>/dev/null | grep -ciE 'out of memory|oom-kill|killed process' || true)
+            echo "kernel OOM lines: ${n:-0}"
+            sudo journalctl -k --no-pager 2>/dev/null | grep -iE 'out of memory|oom-kill|killed process' | tail -10 || true
+
+            echo
+            echo "## kernel messages around the crash window"
+            sudo journalctl -k --no-pager --since '2026-08-19 14:15' --until '2026-08-19 14:35' 2>/dev/null | tail -40 || true
+
+            echo
+            echo "## why did the runner stop?"
+            sudo tail -40 /home/ubuntu/actions-runner/_diag/Runner_*.log 2>/dev/null | tail -40 || echo "(no runner diag logs readable)"
+
+            echo
+            echo "## docker state"
+            docker ps -a --format '{{.Names}} {{.Status}}' | head
+            docker system df 2>/dev/null | head -5
+            df -h / | tail -1
+          } | tee /tmp/diag.txt
+          {
+            echo '```'
+            cat /tmp/diag.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: join the tailnet
+        if: github.event.inputs.action == 'tailscale-up'
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TS_AUTHKEY:-}" ]; then
+            echo "::error::TS_AUTHKEY is not set on this repository"
+            exit 1
+          fi
+          # provision-box.sh installs the tailscale package but never
+          # authenticates it, which is why this box was unreachable. --ssh so
+          # the tailnet is enough on its own; no public port has to open.
+          sudo tailscale up --authkey "$TS_AUTHKEY" --hostname weloveyou-bench \
+            --advertise-tags=tag:ci --ssh --accept-dns=false
+          echo "joined as: $(tailscale ip -4 2>/dev/null | head -1)"
+          {
+            echo "### bench box joined the tailnet"
+            echo
+            echo "- address: \`$(tailscale ip -4 2>/dev/null | head -1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
