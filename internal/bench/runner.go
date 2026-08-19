@@ -15,7 +15,9 @@ type Container interface {
 	Start(name, image string, env []string) error
 	Logs(name string) (io.ReadCloser, error)
 	Exec(name string, args ...string) error
-	MemUsage(name string) (string, error)
+	// Stats returns one docker stats line carrying CPU and memory together, so
+	// a sample is one call rather than two racing ones.
+	Stats(name string) (string, error)
 	Remove(name string) error
 }
 
@@ -46,7 +48,7 @@ const FabricAPIURL = "https://cdn.modrinth.com/data/P7dR8mSH/versions/Nlt8gI9z/f
 // Env builds the container environment for one profile and workload.
 func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 	env := []string{
-		"EULA=TRUE", "TYPE=FABRIC", "VERSION=1.21.1", "MEMORY=6G",
+		"EULA=TRUE", "TYPE=FABRIC", "VERSION=1.21.1", "MEMORY=" + p.Heap(),
 		"LEVEL=" + BenchSeed, "SEED=" + BenchSeed,
 		"ONLINE_MODE=false", "SERVER_PORT=25598",
 		// -Xlog:gc rather than JFR: the pause distribution is all the sweep
@@ -109,10 +111,10 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 			_ = c.Exec(name, "rcon-cli", "chunky start")
 		}
 		if sc.Ready() {
-			if s, err := c.MemUsage(name); err == nil {
-				if v, ok := ParseMemUsage(s); ok {
-					sc.Observe(v)
-				}
+			if line, err := c.Stats(name); err == nil {
+				rss, _ := ParseMemUsage(statsField(line, 1))
+				cpu, _ := ParseCPUPerc(statsField(line, 0))
+				sc.Observe(rss, cpu)
 			}
 		}
 		if sc.Finished() {
@@ -126,4 +128,15 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 		return sc.Run(), fmt.Errorf("server never reported ready")
 	}
 	return sc.Run(), fmt.Errorf("log ended before pregeneration finished")
+}
+
+// statsField splits one docker stats line on tabs. Tab rather than a space or a
+// comma because the MemUsage column contains both ("6.5GiB / 12GiB"), so any
+// separator that also appears inside a field would need quoting to survive.
+func statsField(line string, i int) string {
+	parts := strings.Split(line, "\t")
+	if i >= len(parts) {
+		return ""
+	}
+	return parts[i]
 }

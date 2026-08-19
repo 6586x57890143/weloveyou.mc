@@ -74,6 +74,26 @@ func ParseMemUsage(s string) (float64, bool) {
 	return v * mult, true
 }
 
+var cpuPerc = regexp.MustCompile(`([\d.]+)\s*%`)
+
+// ParseCPUPerc converts a docker stats CPUPerc column to a percentage.
+//
+// Docker reports this relative to a single core, so a saturated two-core box
+// reads ~200%. That is the number worth recording: it says whether a profile
+// actually used the machine or left a core idle, which on a two-core box is the
+// difference between a collector that helps and one that starves the tick loop.
+func ParseCPUPerc(s string) (float64, bool) {
+	m := cpuPerc.FindStringSubmatch(s)
+	if m == nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(m[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 // ServerReady matches the line a Minecraft server prints once it is accepting
 // connections, and returns its startup duration.
 // Fabric announces its mod count at startup. It is recorded because it is the

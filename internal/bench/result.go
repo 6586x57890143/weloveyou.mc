@@ -21,6 +21,7 @@ type Run struct {
 	Elapsed  time.Duration
 	Startup  time.Duration
 	PeakRSS  float64 // bytes
+	PeakCPU  float64 // percent, relative to one core: 200 means both cores busy
 	GCPauses []float64
 }
 
@@ -35,6 +36,7 @@ func (r Run) ChunksPerSec() float64 {
 // Result aggregates the repeats of one profile on one workload.
 type Result struct {
 	Profile  string
+	Heap     string // the heap it ran with, so a row is self-describing
 	Workload Workload
 	Runs     []Run
 	Dropped  []string // flags the JVM refused during preflight
@@ -51,6 +53,9 @@ func (res Result) collect(f func(Run) float64) []float64 {
 func (res Result) ChunksPerSec() float64 { return Median(res.collect(Run.ChunksPerSec)) }
 func (res Result) PeakRSS() float64 {
 	return Median(res.collect(func(r Run) float64 { return r.PeakRSS }))
+}
+func (res Result) PeakCPU() float64 {
+	return Median(res.collect(func(r Run) float64 { return r.PeakCPU }))
 }
 func (res Result) Startup() float64 {
 	return Median(res.collect(func(r Run) float64 { return r.Startup.Seconds() }))

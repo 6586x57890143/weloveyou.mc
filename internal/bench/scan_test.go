@@ -101,12 +101,29 @@ func TestScannerWithoutGenerationHasNoElapsed(t *testing.T) {
 }
 
 func TestObserveKeepsThePeak(t *testing.T) {
+	// Both high-water marks move independently: the run that used the most
+	// memory is not necessarily the moment that used the most CPU.
 	s := NewScanner(nil)
-	for _, v := range []float64{1e9, 3e9, 2e9} {
-		s.Observe(v)
+	for _, v := range [][2]float64{{1e9, 40}, {3e9, 190}, {2e9, 55}} {
+		s.Observe(v[0], v[1])
 	}
-	if got := s.Run().PeakRSS; got != 3e9 {
-		t.Errorf("PeakRSS = %v, want the high-water mark 3e9", got)
+	run := s.Run()
+	if run.PeakRSS != 3e9 {
+		t.Errorf("PeakRSS = %v, want the high-water mark 3e9", run.PeakRSS)
+	}
+	if run.PeakCPU != 190 {
+		t.Errorf("PeakCPU = %v, want the high-water mark 190", run.PeakCPU)
+	}
+}
+
+func TestObserveIgnoresASampleThatDidNotParse(t *testing.T) {
+	// A failed docker stats read arrives as zero, and zero must not clobber a
+	// peak already seen.
+	s := NewScanner(nil)
+	s.Observe(3e9, 190)
+	s.Observe(0, 0)
+	if run := s.Run(); run.PeakRSS != 3e9 || run.PeakCPU != 190 {
+		t.Errorf("a zero sample lowered the peaks: %+v", run)
 	}
 }
 

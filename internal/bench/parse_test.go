@@ -135,3 +135,27 @@ func TestParsersRejectOversizedNumbers(t *testing.T) {
 		t.Error("an unrepresentable startup time should be refused")
 	}
 }
+
+func TestParseCPUPerc(t *testing.T) {
+	tests := []struct {
+		name, in string
+		want     float64
+		ok       bool
+	}{
+		// Docker reports relative to one core, so >100% on a multi-core box.
+		{"both cores busy", "175.20%", 175.20, true},
+		{"idle", "0.00%", 0, true},
+		{"with the memory column", "12.34%\t2.5GiB / 11.6GiB", 12.34, true},
+		{"no percentage", "--", 0, false},
+		{"empty", "", 0, false},
+		{"unparseable number", strings.Repeat("9", 400) + "%", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseCPUPerc(tt.in)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("ParseCPUPerc(%q) = (%v, %v), want (%v, %v)", tt.in, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}

@@ -218,6 +218,44 @@ image = "itzg/minecraft-server:java25"
 aikar = true
 flagsets = ["coh"]
 
+# ---------------------------------------------------------------------------
+# Heap size, as its own dimension
+# ---------------------------------------------------------------------------
+# The question is not whether Minecraft CAN use the whole box. It is where more
+# memory stops buying throughput. If 6G and 10G land inside the noise floor then
+# the difference is decorative RAM, and it belongs to the page cache and the OS
+# instead — on a box with 12GB total and no swap, that is not a small decision.
+#
+# Run against the profile that ships today, so the answer is actionable now and
+# does not wait on the collector shootout. `memory` defaults to 6G, which is what
+# deploy/docker-compose.yml sets, so every other profile keeps measuring what
+# production actually runs.
+
+[profiles.j25-g1-coh-4g]
+description = "Compact headers on a heap smaller than production's. Where does it start hurting?"
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "4G"
+flagsets = ["coh"]
+
+[profiles.j25-g1-coh-8g]
+description = "Two gigabytes more than production. Does throughput notice?"
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "8G"
+flagsets = ["coh"]
+
+[profiles.j25-g1-coh-10g]
+description = """
+Ten of the box's twelve gigabytes, leaving two for the OS, Docker and page
+cache. Also the closest thing the matrix has to a deliberate stress case: if
+memory pressure ever destabilises this box, this is the row that will show it.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "10G"
+flagsets = ["coh"]
+
 [profiles.j25-g1-bruce-coh]
 description = "The reference flag set plus the headline candidate, on current Temurin."
 image = "itzg/minecraft-server:java25"

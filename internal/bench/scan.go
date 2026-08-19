@@ -60,11 +60,15 @@ func (s *Scanner) Ready() bool { return s.ready }
 // Finished reports whether pregeneration has completed.
 func (s *Scanner) Finished() bool { return s.finished }
 
-// Observe records a memory sample, keeping the high-water mark. The interesting
-// figure is the peak during generation, not whatever it happens to be at the end.
-func (s *Scanner) Observe(rssBytes float64) {
+// Observe records a resource sample, keeping the high-water marks. The
+// interesting figures are the peaks during generation, not whatever they happen
+// to be at the end.
+func (s *Scanner) Observe(rssBytes, cpuPercent float64) {
 	if rssBytes > s.run.PeakRSS {
 		s.run.PeakRSS = rssBytes
+	}
+	if cpuPercent > s.run.PeakCPU {
+		s.run.PeakCPU = cpuPercent
 	}
 }
 

@@ -34,8 +34,8 @@ func (f *fakeDocker) Exec(_ string, args ...string) error {
 	f.execs = append(f.execs, strings.Join(args, " "))
 	return nil
 }
-func (f *fakeDocker) MemUsage(string) (string, error) { return f.mem, f.memErr }
-func (f *fakeDocker) Remove(string) error             { f.removes++; return nil }
+func (f *fakeDocker) Stats(string) (string, error) { return f.mem, f.memErr }
+func (f *fakeDocker) Remove(string) error          { f.removes++; return nil }
 
 const happyLog = `[main/INFO]: Loading 87 mods
 [1.0s][info][gc] GC(1) Pause Young 8.500ms
@@ -59,7 +59,7 @@ aikar = true
 
 func TestExecuteHappyPath(t *testing.T) {
 	p, cfg := testProfile()
-	f := &fakeDocker{log: happyLog, mem: "2.5GiB / 11.6GiB"}
+	f := &fakeDocker{log: happyLog, mem: "175.20%	2.5GiB / 11.6GiB"}
 
 	run, err := Execute(f, p, cfg, WorkloadPack, []string{"-XX:+UseCompactObjectHeaders"},
 		500, clock(time.Second), DefaultTimeouts())

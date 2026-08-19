@@ -20,10 +20,29 @@ type Profile struct {
 	Description string   `toml:"description"`
 	Image       string   `toml:"image"`
 	Aikar       bool     `toml:"aikar"`
+	Memory      string   `toml:"memory"`
 	XX          []string `toml:"xx"`
 	Opts        []string `toml:"opts"`
 	enabled     *bool
 }
+
+// Heap is the container heap size for this profile, defaulting to what
+// production runs today.
+//
+// It is a dimension rather than a constant because the useful question is not
+// whether Minecraft CAN use the whole box, it is where more memory stops buying
+// throughput. If 6G and 10G land inside the noise floor then the difference is
+// decorative RAM, and it belongs to the page cache instead.
+func (p Profile) Heap() string {
+	if p.Memory == "" {
+		return DefaultHeap
+	}
+	return p.Memory
+}
+
+// DefaultHeap matches deploy/docker-compose.yml, so a profile that says nothing
+// about memory measures what actually ships.
+const DefaultHeap = "6G"
 
 // Enabled reports whether the sweep should run this profile. Absent means yes:
 // a profile is opt-out, so adding one to the file is enough to have it measured.
@@ -33,6 +52,7 @@ type rawProfile struct {
 	Description string   `toml:"description"`
 	Image       string   `toml:"image"`
 	Aikar       bool     `toml:"aikar"`
+	Memory      string   `toml:"memory"`
 	Flagsets    []string `toml:"flagsets"`
 	XX          []string `toml:"xx"`
 	Opts        []string `toml:"opts"`
@@ -73,7 +93,7 @@ func Parse(data []byte) (*Config, error) {
 		}
 		cfg.Profiles = append(cfg.Profiles, Profile{
 			Name: name, Description: r.Description, Image: r.Image,
-			Aikar: r.Aikar, XX: xx, Opts: r.Opts, enabled: r.Enabled,
+			Aikar: r.Aikar, Memory: r.Memory, XX: xx, Opts: r.Opts, enabled: r.Enabled,
 		})
 	}
 	// Deterministic order, so two sweeps of the same file produce rows in the
