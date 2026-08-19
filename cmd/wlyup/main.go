@@ -1,7 +1,7 @@
 // Command wlyup is the player-side pack updater: it reads the published
 // packwiz index for a channel and brings a local install in line with it.
 //
-// Single static binary — no Java, no launcher plugin.
+// Single static binary, no Java, no launcher plugin.
 package main
 
 import (

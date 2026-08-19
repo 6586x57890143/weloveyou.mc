@@ -1,4 +1,4 @@
-# wly configuration. Secrets are NOT here — they arrive as environment
+# wly configuration. Secrets are NOT here, they arrive as environment
 # variables (WLY_DISCORD_TOKEN, WLY_RCON_PASSWORD, WLY_R2_*) because a value in
 # this file would be readable through `docker inspect`.
 #
@@ -13,7 +13,7 @@ container = "wly-mc"
 
 # No object storage for now. The pack is served from GitHub Pages and the map
 # will be served by squaremap's own webserver on this box, so there is nothing
-# left for R2 to do. Revisit if the VPS struggles to serve tiles — a Cloudflare
+# left for R2 to do. Revisit if the VPS struggles to serve tiles, a Cloudflare
 # proxy in front of it is the cheaper next step than moving the files.
 
 # Written daily by the wly-cost systemd timer on the box. The daily push
@@ -29,7 +29,7 @@ events_channel = ""
 releases_channel = ""
 
 # One entry per pack channel. Adding a channel is a table here plus a compose
-# service — no code change.
+# service, no code change.
 [channels.stable]
 mc_version = "1.21.1"
 pack_url   = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"

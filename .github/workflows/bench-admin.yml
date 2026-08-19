@@ -72,7 +72,7 @@ jobs:
             echo
             echo "## the question: was anything OOM-killed, in ANY boot?"
             # _TRANSPORT=kernel rather than -k: `-k` implies `-b`, so it would
-            # only ever search the CURRENT boot — and this box rebooted after
+            # only ever search the CURRENT boot, and this box rebooted after
             # the crash. That would report a reassuring zero and prove nothing.
             n=$(sudo journalctl _TRANSPORT=kernel --no-pager 2>/dev/null | grep -ciE 'out of memory|oom-kill|killed process' || true)
             echo "kernel OOM lines across all retained boots: ${n:-0}"
@@ -134,7 +134,7 @@ jobs:
       #
       # apt-daily.timer and apt-daily-upgrade.timer are OnCalendar=6:00 with
       # Persistent=true, so a box that is powered off except when sweeping fires
-      # the MISSED 06:00 run shortly after every boot — which is exactly when a
+      # the MISSED 06:00 run shortly after every boot, which is exactly when a
       # sweep is running. On 2026-08-19 the box booted at 13:52, apt-daily-
       # upgrade started at 14:22:57, and the sweep was cancelled at 14:25:25.
       # That run consumed 4min 7s of CPU on a two-core machine.
@@ -156,7 +156,7 @@ jobs:
             echo
             echo "Masked apt-daily, apt-daily-upgrade, unattended-upgrades and the motd/fwupd/ua timers."
             echo
-            echo "sysstat-collect is deliberately left running — ten-minutely CPU history is"
+            echo "sysstat-collect is deliberately left running, ten-minutely CPU history is"
             echo "evidence, not noise, and it is what would corroborate the next anomaly."
             echo
             echo '```'

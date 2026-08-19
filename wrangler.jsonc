@@ -15,7 +15,7 @@
   "name": "weloveyou-bench",
   "compatibility_date": "2026-08-19",
   "assets": {
-    // Written by scripts/bench-site.py, and gitignored — the source of truth is
+    // Written by scripts/bench-site.py, and gitignored, the source of truth is
     // BENCHMARKS.json in the repository, not the rendered output.
     "directory": "./site"
   }

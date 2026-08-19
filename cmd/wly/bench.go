@@ -109,8 +109,8 @@ func benchCmd(args []string, out io.Writer) error {
 	fmt.Fprintf(out, "\nwrote %s\n", filepath.Base(*outPath))
 
 	// The machine-readable twin, for the published site. The two useful moments
-	// are separated in time — results exist only during the sweep, but
-	// publishing waits until a human has read the numbers and merged them — so
+	// are separated in time, results exist only during the sweep, but
+	// publishing waits until a human has read the numbers and merged them, so
 	// the data is committed alongside the prose rather than re-parsed out of it.
 	if *jsonPath != "" {
 		doc, err := bench.RenderJSON(results, host, time.Now())
@@ -124,7 +124,7 @@ func benchCmd(args []string, out io.Writer) error {
 	}
 
 	// A sweep where every run failed still writes a report, and used to exit 0
-	// with it — so the workflow went green having measured nothing. Twelve
+	// with it, so the workflow went green having measured nothing. Twelve
 	// hours of that is worse than a red build, because an empty file looks like
 	// a result and gets committed as one.
 	measured := 0

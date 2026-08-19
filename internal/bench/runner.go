@@ -34,13 +34,13 @@ const PackURL = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"
 // the pack repo's CI verifies every download URL resolves, which is the only
 // thing standing between a rotted pin and a sweep that measures nothing. The
 // first live run died on a stale Chunky version that had been replaced on the
-// CDN — same jar name, different version hash — and the failure arrived as
+// CDN (same jar name, different version hash), and the failure arrived as
 // "server never reported ready", which names the symptom and not the cause.
 const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/RVFHfo1D/Chunky-Fabric-1.4.23.jar"
 
 // SparkURL is the tick instrument, and it is pinned deliberately.
 //
-// 1.10.109 (2024-09-26) is the newest build declaring 1.21.1 — spark moved on to
+// 1.10.109 (2024-09-26) is the newest build declaring 1.21.1, spark moved on to
 // >=26.1 and is not coming back. jvm-profiles.toml recorded spark as unusable
 // because its bundled async-profiler segfaulted the JVM on Java 25/aarch64 in
 // restart loops. That was true and the cause was findable: spark runs a
@@ -59,7 +59,7 @@ const SparkURL = "https://cdn.modrinth.com/data/l6YH9Als/versions/cALUj9l1/spark
 var SparkOpts = []string{"-Dspark.backgroundProfiler=false"}
 
 // FabricAPIURL is Chunky's hard dependency. The vanilla control is still the
-// control: this is a library and the pregenerator, not content — but without it
+// control: this is a library and the pregenerator, not content, but without it
 // the server refuses to start with "requires any version of fabric, which is
 // missing", which is the same class of bug deps-check.py exists to catch in the
 // pack repo and which nothing here was checking.

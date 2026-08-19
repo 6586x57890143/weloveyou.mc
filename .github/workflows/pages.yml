@@ -4,7 +4,7 @@ name: pages
 #
 # Deliberately NOT part of bench.yml. The sweep proposes numbers; a human reads
 # them and merges. Publishing keys off that merge, so what reaches the web is
-# what someone chose to stand behind — never a raw sweep, and never a screening
+# what someone chose to stand behind, never a raw sweep, and never a screening
 # pass that nobody looked at.
 #
 # Runs on a GitHub-hosted runner, not the bench box. Rendering a page is not a
@@ -60,7 +60,7 @@ jobs:
 
       # Workers Static Assets, configured in wrangler.jsonc. Uploads only the
       # rendered directory, so Cloudflare is never granted read access to the
-      # repository — the same stance as the pack repo's Direct Upload.
+      # repository, the same stance as the pack repo's Direct Upload.
       #
       # This replaced `pages deploy`, which failed with 'The Pages project
       # "weloveyou-bench" does not exist' because the `pages project create`
@@ -89,6 +89,6 @@ jobs:
               echo "- <$url>"
               echo "- data: <$url/benchmarks.json>"
             else
-              echo "Deployed, but no URL appeared in wrangler's output — see the deploy step."
+              echo "Deployed, but no URL appeared in wrangler's output. See the deploy step."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -47,24 +47,24 @@ a{color:inherit}
 """
 
 CAVEATS = [
-    "Measured on the box the server actually runs on — an Oracle Ampere A1, "
+    "Measured on the box the server actually runs on, an Oracle Ampere A1, "
     "<strong>2 cores, aarch64</strong>. Numbers from a desktop would be a different "
     "machine's answer: the same job runs about ten times faster on a Ryzen 9600X.",
     "A <strong>screening</strong> pass is a single run with no variance to report. "
     "A <strong>confirmed</strong> pass is the median of repeats. Never compare one "
     "against the other.",
     "Workload B measures the pack as it was on the day. <strong>The pack grows</strong>, "
-    "so the mod count is printed with every table — rows taken against different packs "
+    "so the mod count is printed with every table, rows taken against different packs "
     "are not comparable.",
     "Anything inside the noise floor is shown as <code>~</code> rather than a number, "
     "because on a shared VM it is not a result.",
     "<strong>Peak CPU is relative to one core</strong>, so 200% means both cores were "
-    "saturated. A profile well under that left parallelism unused — often the "
+    "saturated. A profile well under that left parallelism unused, often the "
     "explanation for a throughput number that looks disappointing.",
     "<strong>MSPT is the number players feel.</strong> A tick is 50ms; a 95th "
     "percentile above that means the server is routinely behind, however good its "
     "chunk throughput looks. Measured with spark, whose background profiler is "
-    "disabled — it segfaults the JVM on Java 25/aarch64.",
+    "disabled, it segfaults the JVM on Java 25/aarch64.",
     "<strong>Heap is a dimension, not a constant.</strong> The useful question is not "
     "whether the server can use the whole box, it is where more memory stops buying "
     "throughput.",
@@ -85,7 +85,7 @@ def cell_mspt(ms):
     """95th-percentile tick duration. A tick is 50ms; past that the server is
     behind and players feel it, so that is where this turns red."""
     if not ms:
-        return "<td>—</td>"
+        return "<td>, </td>"
     cls = ' class="lose"' if ms >= 50 else ""
     return f"<td{cls}>{ms:.1f}ms</td>"
 
@@ -94,7 +94,7 @@ def cell_tps(tps):
     """20 is the ceiling, not a target. Anything below it is the server failing
     to keep up, which throughput alone will not tell you."""
     if not tps:
-        return "<td>—</td>"
+        return "<td>, </td>"
     cls = ' class="lose"' if tps < 19.5 else ' class="win"'
     return f"<td{cls}>{tps:.1f}</td>"
 
@@ -107,14 +107,14 @@ def cell_cpu(pct):
     interesting half of a disappointing throughput number.
     """
     if not pct:
-        return "<td>—</td>"
+        return "<td>, </td>"
     cls = ' class="lose"' if pct < 150 else ""
     return f"<td{cls}>{pct:.0f}%</td>"
 
 
 def human_bytes(n):
     if not n:
-        return "—"
+        return ", "
     for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
         if n < 1024 or unit == "TiB":
             return f"{n:.2f} {unit}" if unit not in ("B", "KiB") else f"{n:.0f} {unit}"
@@ -125,9 +125,10 @@ def render(doc):
     workloads = doc.get("workloads") or {}
     parts = [
         "<main>",
-        "<h1>weloveyou · JVM benchmarks</h1>",
-        '<p class="sub">Which JVM, which collector, which flags — measured on the '
-        "server we actually ship, not inherited from a guide.</p>",
+        "<h1>weloveyou 💖 JVM benchmarks</h1>",
+        '<p class="sub">Which JVM, which collector, which flags. Measured on the '
+        "little two-core box we actually run, because copying numbers off a "
+        "four-year-old guide is how you end up confidently wrong.</p>",
     ]
     if workloads:
         parts.append(
@@ -142,11 +143,10 @@ def render(doc):
         # moment publishing is wired up, and says what it is waiting for.
         parts.append(
             '<div class="caveats"><h3>No results yet</h3>'
-            "<ul><li>The sweep runs on a two-core Ampere A1 that is powered off "
-            "unless it is measuring, so numbers arrive in batches rather than "
-            "continuously.</li>"
-            "<li>Results are published when a human has read them and merged "
-            "them — never straight from a run.</li></ul></div>"
+            "<ul><li>The sweep runs on a two-core Ampere A1 that stays powered off "
+            "unless it is measuring, so numbers turn up in batches.</li>"
+            "<li>Nothing gets published until a human has read it and merged it. "
+            "No results straight off a run.</li></ul></div>"
         )
 
     for key in ("vanilla", "pack"):
@@ -157,7 +157,7 @@ def render(doc):
         mods = wl.get("mods_loaded") or 0
         if mods:
             note = (
-                f"{mods} mods loaded — this pack grows, so these rows are only "
+                f"{mods} mods loaded, this pack grows, so these rows are only "
                 "comparable to runs against a similar pack."
                 if key == "pack"
                 else f"{mods} mods loaded (Fabric API and the pregenerator)."
@@ -175,7 +175,7 @@ def render(doc):
             parts.append(
                 "<tr>"
                 f"<td><code>{html.escape(row.get('profile', '?'))}</code></td>"
-                f"<td>{html.escape(row.get('heap') or '—')}</td>"
+                f"<td>{html.escape(row.get('heap') or ', ')}</td>"
                 f"<td>{row.get('chunks_per_sec', 0):.1f}</td>"
                 + cell_delta(row.get("vs_baseline", ""))
                 + cell_mspt(row.get("mspt_p95_ms") or 0)
@@ -211,7 +211,7 @@ def render(doc):
         "<!doctype html>\n"
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
-        "<title>weloveyou · JVM benchmarks</title>"
+        "<title>weloveyou 💖 JVM benchmarks</title>"
         f"<style>{CSS}</style></head><body>\n{body}\n</body></html>\n"
     )
 
@@ -227,7 +227,7 @@ def main():
         doc = json.loads(src.read_text(encoding="utf-8"))
     else:
         # Not an error. pages.yml also triggers when its own files change, so
-        # the very first run happens before any sweep has been merged — and
+        # the very first run happens before any sweep has been merged, and
         # failing there makes a perfectly good merge look broken. Publishing
         # nothing is not a failure when there is nothing to publish, so the
         # site goes up saying exactly that and the first real sweep replaces it.
