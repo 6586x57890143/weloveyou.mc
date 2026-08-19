@@ -1,0 +1,23 @@
+{
+  "host": "weloveyou-bench",
+  "generated": "2026-08-19T14:44:08Z",
+  "repeats_per_profile": 1,
+  "noise_floor": 0.05,
+  "workloads": {
+    "vanilla": {
+      "title": "Workload A - vanilla worldgen (control)",
+      "mods_loaded": 43,
+      "rows": [
+        {
+          "profile": "j21-graalvm-g1-bruce",
+          "chunks_per_sec": 6.04377951518898,
+          "vs_baseline": "~",
+          "peak_rss_bytes": 6998649208.832,
+          "startup_sec": 24.258,
+          "gc_pause_p99_ms": 100.58491,
+          "repeats": 1
+        }
+      ]
+    }
+  }
+}
