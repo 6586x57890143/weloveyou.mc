@@ -58,29 +58,37 @@ jobs:
       - name: render the site
         run: python scripts/bench-site.py --json BENCHMARKS.json --out site
 
-      # Direct Upload, like the pack repo — Cloudflare is never granted read
-      # access to the repository. No gh-pages accumulator here though: the pack
-      # needs one to retain immutable per-version prefixes, whereas every past
-      # benchmark is already in git. One less moving part.
-      - name: deploy to cloudflare pages
+      # Workers Static Assets, configured in wrangler.jsonc. Uploads only the
+      # rendered directory, so Cloudflare is never granted read access to the
+      # repository — the same stance as the pack repo's Direct Upload.
+      #
+      # This replaced `pages deploy`, which failed with 'The Pages project
+      # "weloveyou-bench" does not exist' because the `pages project create`
+      # before it had quietly failed behind a `|| true`. A static-assets Worker
+      # needs no project to exist first, so the whole step disappears rather
+      # than getting a retry bolted onto it. Cloudflare recommends Workers for
+      # new projects and wrangler says so in its own error message.
+      #
+      # No accumulator branch: the pack needs one to retain immutable
+      # per-version prefixes, whereas every past benchmark is already in git.
+      - name: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT: ${{ vars.CF_BENCH_PAGES_PROJECT || 'weloveyou-bench' }}
         run: |
           set -euo pipefail
-          npx --yes wrangler@4 pages project create "$PROJECT" \
-            --production-branch=main 2>/dev/null || true
-          npx --yes wrangler@4 pages deploy site \
-            --project-name="$PROJECT" --branch=main --commit-dirty=true
+          npx --yes wrangler@4 deploy 2>&1 | tee /tmp/deploy.log
 
       - name: summary
-        env:
-          PROJECT: ${{ vars.CF_BENCH_PAGES_PROJECT || 'weloveyou-bench' }}
         run: |
+          url=$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' /tmp/deploy.log | head -1)
           {
             echo "### benchmarks published"
             echo
-            echo "- <https://${PROJECT}.pages.dev/>"
-            echo "- data: \`https://${PROJECT}.pages.dev/benchmarks.json\`"
+            if [ -n "$url" ]; then
+              echo "- <$url>"
+              echo "- data: <$url/benchmarks.json>"
+            else
+              echo "Deployed, but no URL appeared in wrangler's output — see the deploy step."
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

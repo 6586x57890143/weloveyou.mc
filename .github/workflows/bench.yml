@@ -58,16 +58,17 @@ on:
     # rare enough that the box is mostly available for playing on.
     - cron: "0 4 * * 1"
 
-# The sweep opens a PR with the numbers, which needs to push a branch and create
-# the PR. `contents: read` was enough while the sweep had never run; the first
-# real run died with "Permission to ... denied to github-actions[bot]" 403 after
-# the measurement was already done, throwing the result away.
+# contents: write, to push the results branch. `contents: read` was enough while
+# the sweep had never run; the first real run died with "Permission to ... denied
+# to github-actions[bot]" after the measurement was already done, throwing the
+# numbers away.
 #
-# Still the minimum: no packages, no id-token, and a human merges. The sweep
-# proposes; it does not decide what the server runs on.
+# Deliberately NOT pull-requests: write. Opening a PR from Actions also needs
+# "Allow GitHub Actions to create and approve pull requests" enabled
+# repository-wide, and loosening that on a public repository to save one click
+# is the wrong trade. The sweep proposes; a human opens and merges.
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: bench
@@ -99,9 +100,8 @@ jobs:
 
       # A human merges. The sweep proposes; it does not decide what the server
       # runs on.
-      - name: open a PR when the numbers moved
+      - name: push the results when the numbers moved
         env:
-          GH_TOKEN: ${{ github.token }}
           OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
           set -euo pipefail
@@ -119,37 +119,29 @@ jobs:
           git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
           git push origin "$branch"
 
-          # curl, not `gh`: this runs on the self-hosted bench box, which is a
-          # plain Ubuntu ARM VM with no gh CLI — the first real sweep died here
-          # with "gh: command not found" after the numbers were already
-          # measured. Installing gh would make the box's state a dependency of
-          # the workflow; the REST API is already available to any token.
-          python3 - "$branch" "$OUT" <<'PY' > /tmp/pr.json
-          import json, sys
-          branch, out = sys.argv[1], sys.argv[2]
-          json.dump({
-              "title": "bench: JVM sweep",
-              "head": branch,
-              "base": "main",
-              "body": (
-                  f"Automated sweep into `{out}`.\n\n"
-                  "Review the medians before merging; anything under ~5% is noise.\n"
-                  "A screening pass (runs=1) has no variance to report and must not "
-                  "be compared against confirmed numbers.\n"
-                  "The mod count each workload measured against is in the report — "
-                  "the pack grows, and rows taken against different packs are not "
-                  "comparable."
-              ),
-          }, sys.stdout)
-          PY
-
-          curl -sSf -X POST \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            -H "X-GitHub-Api-Version: 2022-11-28" \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
-            --data-binary @/tmp/pr.json \
-            | python3 -c "import json,sys; print('opened', json.load(sys.stdin)['html_url'])"
+          # Push the branch and hand over a link, rather than opening the PR
+          # here. Creating one from Actions needs "Allow GitHub Actions to
+          # create and approve pull requests" enabled repository-wide, and the
+          # first attempt died on a 403 after the numbers were already measured.
+          # Loosening a security setting on a public repository to save one
+          # click is the wrong trade, and the results still need a human to read
+          # them before they mean anything.
+          #
+          # (The attempt before that died on `gh: command not found` — this box
+          # is a plain Ubuntu ARM VM. Neither tool is needed now.)
+          {
+            echo "### sweep finished"
+            echo
+            echo "Results are on branch \`$branch\`."
+            echo
+            echo "[Open a pull request](https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1)"
+            echo
+            echo "Anything under ~5% is noise. A screening pass (runs=1) has no"
+            echo "variance to report and must not be compared against confirmed"
+            echo "numbers. The mod count each workload measured against is in the"
+            echo "report — the pack grows, and rows taken against different packs"
+            echo "are not comparable."
+          } >> "$GITHUB_STEP_SUMMARY"
 
       # Always, including on failure: a crashed sweep that leaves the box running
       # costs more than the sweep did. An in-guest poweroff transitions the OCI
