@@ -81,21 +81,32 @@ def human_bytes(n):
 
 
 def render(doc):
+    workloads = doc.get("workloads") or {}
     parts = [
         "<main>",
         "<h1>weloveyou · JVM benchmarks</h1>",
         '<p class="sub">Which JVM, which collector, which flags — measured on the '
         "server we actually ship, not inherited from a guide.</p>",
-        '<div class="meta">'
-        f"<span>host <code>{html.escape(doc.get('host', '?'))}</code></span>"
-        f"<span>generated {html.escape(doc.get('generated', '?'))}</span>"
-        f"<span>{doc.get('repeats_per_profile', 0)} run(s) per profile</span>"
-        "</div>",
     ]
-
-    workloads = doc.get("workloads") or {}
-    if not workloads:
-        parts.append("<p>No results yet.</p>")
+    if workloads:
+        parts.append(
+            '<div class="meta">'
+            f"<span>host <code>{html.escape(doc.get('host', '?'))}</code></span>"
+            f"<span>generated {html.escape(doc.get('generated', '?'))}</span>"
+            f"<span>{doc.get('repeats_per_profile', 0)} run(s) per profile</span>"
+            "</div>"
+        )
+    else:
+        # An honest empty state beats a broken build. The page exists from the
+        # moment publishing is wired up, and says what it is waiting for.
+        parts.append(
+            '<div class="caveats"><h3>No results yet</h3>'
+            "<ul><li>The sweep runs on a two-core Ampere A1 that is powered off "
+            "unless it is measuring, so numbers arrive in batches rather than "
+            "continuously.</li>"
+            "<li>Results are published when a human has read them and merged "
+            "them — never straight from a run.</li></ul></div>"
+        )
 
     for key in ("vanilla", "pack"):
         wl = workloads.get(key)
@@ -164,10 +175,17 @@ def main():
     args = ap.parse_args()
 
     src = pathlib.Path(args.json)
-    if not src.exists():
-        print(f"::error::{src} does not exist — has a sweep been run and merged?", file=sys.stderr)
-        return 1
-    doc = json.loads(src.read_text(encoding="utf-8"))
+    if src.exists():
+        doc = json.loads(src.read_text(encoding="utf-8"))
+    else:
+        # Not an error. pages.yml also triggers when its own files change, so
+        # the very first run happens before any sweep has been merged — and
+        # failing there makes a perfectly good merge look broken. Publishing
+        # nothing is not a failure when there is nothing to publish, so the
+        # site goes up saying exactly that and the first real sweep replaces it.
+        print(f"::notice::{src} does not exist yet; publishing a placeholder")
+        doc = {}
+    doc = doc or {}
 
     outdir = pathlib.Path(args.out)
     outdir.mkdir(parents=True, exist_ok=True)
