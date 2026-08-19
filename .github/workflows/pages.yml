@@ -1,0 +1,86 @@
+name: pages
+
+# Publish the benchmark results.
+#
+# Deliberately NOT part of bench.yml. The sweep proposes numbers; a human reads
+# them and merges. Publishing keys off that merge, so what reaches the web is
+# what someone chose to stand behind — never a raw sweep, and never a screening
+# pass that nobody looked at.
+#
+# Runs on a GitHub-hosted runner, not the bench box. Rendering a page is not a
+# measurement, so it has no business competing for the two cores that are, and
+# the bench box is powered off almost all the time anyway.
+on:
+  push:
+    branches: [main]
+    paths:
+      - BENCHMARKS.json
+      - scripts/bench-site.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: render and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      # Fail here rather than three steps later inside wrangler, where the error
+      # is a Cloudflare API message that says nothing about this repository.
+      # These live in weloveyou-pack and have to be copied across; the pack repo
+      # and this one publish to two different Pages projects.
+      - name: check the credentials exist
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -z "$TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$ACCOUNT" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::missing repository secret(s):$missing"
+            echo "Copy them from the weloveyou-pack repository, which already has both."
+            exit 1
+          fi
+
+      - name: render the site
+        run: python scripts/bench-site.py --json BENCHMARKS.json --out site
+
+      # Direct Upload, like the pack repo — Cloudflare is never granted read
+      # access to the repository. No gh-pages accumulator here though: the pack
+      # needs one to retain immutable per-version prefixes, whereas every past
+      # benchmark is already in git. One less moving part.
+      - name: deploy to cloudflare pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ vars.CF_BENCH_PAGES_PROJECT || 'weloveyou-bench' }}
+        run: |
+          set -euo pipefail
+          npx --yes wrangler@4 pages project create "$PROJECT" \
+            --production-branch=main 2>/dev/null || true
+          npx --yes wrangler@4 pages deploy site \
+            --project-name="$PROJECT" --branch=main --commit-dirty=true
+
+      - name: summary
+        env:
+          PROJECT: ${{ vars.CF_BENCH_PAGES_PROJECT || 'weloveyou-bench' }}
+        run: |
+          {
+            echo "### benchmarks published"
+            echo
+            echo "- <https://${PROJECT}.pages.dev/>"
+            echo "- data: \`https://${PROJECT}.pages.dev/benchmarks.json\`"
+          } >> "$GITHUB_STEP_SUMMARY"

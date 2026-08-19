@@ -94,7 +94,8 @@ jobs:
             --runs "${{ github.event.inputs.runs || '3' }}" \
             --radius "${{ github.event.inputs.radius || '1000' }}" \
             --only "${{ github.event.inputs.only || '' }}" \
-            --out "$OUT"
+            --out "$OUT" \
+            --json "${OUT%.md}.json"
 
       # A human merges. The sweep proposes; it does not decide what the server
       # runs on.
@@ -107,13 +108,14 @@ jobs:
           # --porcelain, not `git diff`: a screening pass writes a file that is
           # not tracked yet, and `git diff` cannot see an untracked file, so the
           # first screening run would silently propose nothing.
-          if [ -z "$(git status --porcelain -- "$OUT")" ]; then
+          JSON="${OUT%.md}.json"
+          if [ -z "$(git status --porcelain -- "$OUT" "$JSON")" ]; then
             echo "no change in the numbers; nothing to propose"
             exit 0
           fi
           branch="bench/$(date -u +%Y%m%d-%H%M)"
           git switch -c "$branch"
-          git add -- "$OUT"
+          git add -- "$OUT" "$JSON"
           git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
           git push origin "$branch"
 

@@ -25,6 +25,7 @@ func benchCmd(args []string, out io.Writer) error {
 	var (
 		profiles = fs.String("profiles", "jvm-profiles.toml", "profile definitions")
 		outPath  = fs.String("out", "BENCHMARKS.md", "where to write the results table")
+		jsonPath = fs.String("json", "BENCHMARKS.json", "where to write the machine-readable results")
 		workload = fs.String("workload", "both", "vanilla | pack | both")
 		runs     = fs.Int("runs", 3, "repeats per profile; medians are reported")
 		radius   = fs.Int("radius", 1000, "blocks to pregenerate")
@@ -106,6 +107,21 @@ func benchCmd(args []string, out io.Writer) error {
 		return fmt.Errorf("writing %s: %w", *outPath, err)
 	}
 	fmt.Fprintf(out, "\nwrote %s\n", filepath.Base(*outPath))
+
+	// The machine-readable twin, for the published site. The two useful moments
+	// are separated in time — results exist only during the sweep, but
+	// publishing waits until a human has read the numbers and merged them — so
+	// the data is committed alongside the prose rather than re-parsed out of it.
+	if *jsonPath != "" {
+		doc, err := bench.RenderJSON(results, host, time.Now())
+		if err != nil {
+			return fmt.Errorf("rendering json: %w", err)
+		}
+		if err := os.WriteFile(*jsonPath, append(doc, '\n'), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", *jsonPath, err)
+		}
+		fmt.Fprintf(out, "wrote %s\n", filepath.Base(*jsonPath))
+	}
 
 	// A sweep where every run failed still writes a report, and used to exit 0
 	// with it — so the workflow went green having measured nothing. Twelve
