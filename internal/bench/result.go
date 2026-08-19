@@ -22,6 +22,9 @@ type Run struct {
 	Startup  time.Duration
 	PeakRSS  float64 // bytes
 	PeakCPU  float64 // percent, relative to one core: 200 means both cores busy
+	MSPTMed  float64 // spark: median tick duration, ms
+	MSPTP95  float64 // spark: 95th-percentile tick duration, ms
+	TPS      float64 // spark: ticks per second, 20 is healthy
 	GCPauses []float64
 }
 
@@ -56,6 +59,19 @@ func (res Result) PeakRSS() float64 {
 }
 func (res Result) PeakCPU() float64 {
 	return Median(res.collect(func(r Run) float64 { return r.PeakCPU }))
+}
+
+// MSPT reports tick duration across repeats. Throughput says how fast the
+// server generated chunks; this says whether it stuttered doing it, which is
+// the half a player actually notices.
+func (res Result) MSPTMed() float64 {
+	return Median(res.collect(func(r Run) float64 { return r.MSPTMed }))
+}
+func (res Result) MSPTP95() float64 {
+	return Median(res.collect(func(r Run) float64 { return r.MSPTP95 }))
+}
+func (res Result) TPS() float64 {
+	return Median(res.collect(func(r Run) float64 { return r.TPS }))
 }
 func (res Result) Startup() float64 {
 	return Median(res.collect(func(r Run) float64 { return r.Startup.Seconds() }))

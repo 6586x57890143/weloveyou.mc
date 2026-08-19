@@ -61,6 +61,10 @@ CAVEATS = [
     "<strong>Peak CPU is relative to one core</strong>, so 200% means both cores were "
     "saturated. A profile well under that left parallelism unused — often the "
     "explanation for a throughput number that looks disappointing.",
+    "<strong>MSPT is the number players feel.</strong> A tick is 50ms; a 95th "
+    "percentile above that means the server is routinely behind, however good its "
+    "chunk throughput looks. Measured with spark, whose background profiler is "
+    "disabled — it segfaults the JVM on Java 25/aarch64.",
     "<strong>Heap is a dimension, not a constant.</strong> The useful question is not "
     "whether the server can use the whole box, it is where more memory stops buying "
     "throughput.",
@@ -75,6 +79,24 @@ def cell_delta(text):
     if t.startswith("-"):
         return f'<td class="lose">{t}</td>'
     return f"<td>{t}</td>"
+
+
+def cell_mspt(ms):
+    """95th-percentile tick duration. A tick is 50ms; past that the server is
+    behind and players feel it, so that is where this turns red."""
+    if not ms:
+        return "<td>—</td>"
+    cls = ' class="lose"' if ms >= 50 else ""
+    return f"<td{cls}>{ms:.1f}ms</td>"
+
+
+def cell_tps(tps):
+    """20 is the ceiling, not a target. Anything below it is the server failing
+    to keep up, which throughput alone will not tell you."""
+    if not tps:
+        return "<td>—</td>"
+    cls = ' class="lose"' if tps < 19.5 else ' class="win"'
+    return f"<td{cls}>{tps:.1f}</td>"
 
 
 def cell_cpu(pct):
@@ -144,6 +166,7 @@ def render(doc):
         parts.append(
             '<div class="wrap"><table><thead><tr>'
             "<th>profile</th><th>heap</th><th>chunks/s</th><th>vs base</th>"
+            "<th>MSPT p95</th><th>TPS</th>"
             "<th>peak RSS</th><th>peak CPU</th><th>startup</th>"
             "<th>GC p95</th><th>GC p99</th>"
             "</tr></thead><tbody>"
@@ -155,6 +178,8 @@ def render(doc):
                 f"<td>{html.escape(row.get('heap') or '—')}</td>"
                 f"<td>{row.get('chunks_per_sec', 0):.1f}</td>"
                 + cell_delta(row.get("vs_baseline", ""))
+                + cell_mspt(row.get("mspt_p95_ms") or 0)
+                + cell_tps(row.get("tps") or 0)
                 + f"<td>{human_bytes(row.get('peak_rss_bytes') or 0)}</td>"
                 + cell_cpu(row.get("peak_cpu_percent") or 0)
                 + f"<td>{row.get('startup_sec', 0):.1f}s</td>"

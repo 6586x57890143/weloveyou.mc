@@ -94,6 +94,59 @@ func ParseCPUPerc(s string) (float64, bool) {
 	return v, true
 }
 
+// spark answers `/spark tps` on a worker thread rather than to the caller, so
+// RCON returns nothing and the numbers arrive in the server log instead. That is
+// convenient: the harness already reads the log, so no new channel is needed.
+//
+// The reply is two lines, a header then values:
+//
+//	[⚡] Tick durations (min/med/95%ile/max ms) from last 10s, 1m:
+//	[⚡]  0.2/0.2/0.3/0.4;  0.2/0.2/0.3/4.6
+//
+// Matching the values line by shape rather than tracking the header keeps this
+// stateless. The two groups are the 10s and 1m windows; the 1m one is taken,
+// being the steadier of the two over a multi-minute pregeneration.
+var sparkTicks = regexp.MustCompile(
+	`([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+);\s+([\d.]+)/([\d.]+)/([\d.]+)/([\d.]+)`)
+
+// ParseSparkTicks returns median and 95th-percentile tick duration in
+// milliseconds, from spark's 1-minute window.
+//
+// MSPT is the metric that corresponds to what a player feels. Throughput says
+// how fast chunks were generated; this says whether the server stuttered doing it.
+func ParseSparkTicks(line string) (median, p95 float64, ok bool) {
+	m := sparkTicks.FindStringSubmatch(line)
+	if m == nil {
+		return 0, 0, false
+	}
+	med, err1 := strconv.ParseFloat(m[6], 64)
+	p, err2 := strconv.ParseFloat(m[7], 64)
+	if err1 != nil || err2 != nil {
+		return 0, 0, false
+	}
+	return med, p, true
+}
+
+// spark's TPS line: "20.0, 20.0, *20.0, *20.0, *20.0" for 5s/10s/1m/5m/15m. The
+// asterisk marks a window shorter than its label, which is normal early in a run.
+var sparkTPS = regexp.MustCompile(
+	`\*?([\d.]+),\s*\*?([\d.]+),\s*\*?([\d.]+),\s*\*?([\d.]+),\s*\*?([\d.]+)`)
+
+// ParseSparkTPS returns the 1-minute TPS figure.
+func ParseSparkTPS(line string) (float64, bool) {
+	m := sparkTPS.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(m[3], 64)
+	if err != nil || v > 20.01 {
+		// Above 20 is not a tick rate; it is some other comma-separated line
+		// that happened to have five numbers in it.
+		return 0, false
+	}
+	return v, true
+}
+
 // ServerReady matches the line a Minecraft server prints once it is accepting
 // connections, and returns its startup duration.
 // Fabric announces its mod count at startup. It is recorded because it is the

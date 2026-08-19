@@ -35,6 +35,12 @@ func (s *Scanner) Feed(line string) (justReady bool) {
 	if n, ok := ParseLoadedMods(line); ok {
 		s.run.Mods = n
 	}
+	if med, p95, ok := ParseSparkTicks(line); ok {
+		s.run.MSPTMed, s.run.MSPTP95 = med, p95
+	}
+	if tps, ok := ParseSparkTPS(line); ok {
+		s.run.TPS = tps
+	}
 	if ms, ok := ParseGCPause(line); ok {
 		s.run.GCPauses = append(s.run.GCPauses, ms)
 	}

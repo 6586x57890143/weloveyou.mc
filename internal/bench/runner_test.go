@@ -152,14 +152,29 @@ func TestExecuteDefaultsItsClock(t *testing.T) {
 func TestEnvSelectsTheWorkloadSource(t *testing.T) {
 	p, cfg := testProfile()
 	pack := strings.Join(Env(p, cfg, WorkloadPack, nil), " ")
-	if !strings.Contains(pack, "PACKWIZ_URL="+PackURL) || strings.Contains(pack, "MODS=") {
-		t.Errorf("pack workload env = %s", pack)
+	if !strings.Contains(pack, "PACKWIZ_URL="+PackURL) {
+		t.Errorf("pack workload must come from the published pack: %s", pack)
 	}
-	// The control loads Chunky and nothing else; a content mod here would make
-	// it not a control.
+	// spark rides alongside the pack as the tick instrument. The pack itself
+	// does not ship it, so it has to be added here or workload B has no MSPT.
+	if !strings.Contains(pack, SparkURL) {
+		t.Errorf("pack workload has no tick instrument: %s", pack)
+	}
+	// The control loads the instruments and nothing else; a content mod here
+	// would make it not a control.
 	van := strings.Join(Env(p, cfg, WorkloadVanilla, nil), " ")
-	if !strings.Contains(van, "MODS="+ChunkyURL) || strings.Contains(van, "PACKWIZ_URL") {
+	if !strings.Contains(van, ChunkyURL) || strings.Contains(van, "PACKWIZ_URL") {
 		t.Errorf("vanilla workload env = %s", van)
+	}
+	if !strings.Contains(van, FabricAPIURL) || !strings.Contains(van, SparkURL) {
+		t.Errorf("control is missing an instrument or its dependency: %s", van)
+	}
+	// Without this spark starts async-profiler at boot and the JVM segfaults on
+	// Java 25 / aarch64.
+	for _, e := range []string{pack, van} {
+		if !strings.Contains(e, "-Dspark.backgroundProfiler=false") {
+			t.Errorf("spark's background profiler is not disabled: %s", e)
+		}
 	}
 	for _, want := range []string{"SEED=" + BenchSeed, "-Xlog:gc", "USE_AIKAR_FLAGS=true",
 		"--sun-misc-unsafe-memory-access=allow"} {

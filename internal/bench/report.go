@@ -42,12 +42,13 @@ func Render(results []Result, host string, when time.Time) string {
 		// p95 alongside p99: p99 is the tail everyone quotes, but a collector
 		// whose p95 is already high is stalling routinely rather than rarely,
 		// and that is a different problem with a different fix.
-		b.WriteString("| profile | heap | chunks/s | vs base | peak RSS | peak CPU | startup | GC p95 | GC p99 |\n")
-		b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+		b.WriteString("| profile | heap | chunks/s | vs base | MSPT p95 | TPS | peak RSS | peak CPU | startup | GC p95 | GC p99 |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 		base := baselineOf(rows)
 		for _, r := range rows {
-			fmt.Fprintf(&b, "| `%s` | %s | %.1f | %s | %s | %.0f%% | %.1fs | %.1fms | %.1fms |\n",
+			fmt.Fprintf(&b, "| `%s` | %s | %.1f | %s | %.1fms | %.1f | %s | %.0f%% | %.1fs | %.1fms | %.1fms |\n",
 				r.Profile, r.Heap, r.ChunksPerSec(), delta(base, r.ChunksPerSec()),
+				r.MSPTP95(), r.TPS(),
 				humanBytes(r.PeakRSS()), r.PeakCPU(), r.Startup(),
 				r.GCPause(95), r.GCPause(99))
 		}

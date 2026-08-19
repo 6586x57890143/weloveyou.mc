@@ -38,6 +38,26 @@ const PackURL = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"
 // "server never reported ready", which names the symptom and not the cause.
 const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/RVFHfo1D/Chunky-Fabric-1.4.23.jar"
 
+// SparkURL is the tick instrument, and it is pinned deliberately.
+//
+// 1.10.109 (2024-09-26) is the newest build declaring 1.21.1 — spark moved on to
+// >=26.1 and is not coming back. jvm-profiles.toml recorded spark as unusable
+// because its bundled async-profiler segfaulted the JVM on Java 25/aarch64 in
+// restart loops. That was true and the cause was findable: spark runs a
+// BACKGROUND profiler on servers by default, which engages async-profiler at
+// boot. Disabling it (see SparkOpts) leaves `/spark tps` working, because tick
+// timing comes from spark's own hook and never touches the native agent.
+// Verified booting on the real aarch64 bench box: Done (1.670s), 45 mods.
+//
+// If flame graphs are ever wanted here, the bundled async-profiler is 2.9 from
+// 2022; current spark ships 4.5, and the aarch64 .so exports every JNI symbol
+// 2.9 did. Swapping just that file is a possible follow-up, not a need.
+const SparkURL = "https://cdn.modrinth.com/data/l6YH9Als/versions/cALUj9l1/spark-1.10.109-fabric.jar"
+
+// SparkOpts keeps spark from starting async-profiler at boot. Without this the
+// JVM dies with SIGSEGV in VMThread::nativeThreadId on Java 25/aarch64.
+var SparkOpts = []string{"-Dspark.backgroundProfiler=false"}
+
 // FabricAPIURL is Chunky's hard dependency. The vanilla control is still the
 // control: this is a library and the pregenerator, not content — but without it
 // the server refuses to start with "requires any version of fabric, which is
@@ -54,14 +74,18 @@ func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 		// -Xlog:gc rather than JFR: the pause distribution is all the sweep
 		// needs from the collector, and a log line needs no recording
 		// lifecycle, no dump step and no jfr tool in the image.
-		"JVM_OPTS=" + strings.TrimSpace("-Xlog:gc "+strings.Join(cfg.CompatFor(p), " ")),
+		"JVM_OPTS=" + strings.TrimSpace("-Xlog:gc "+
+			strings.Join(append(append([]string{}, SparkOpts...), cfg.CompatFor(p)...), " ")),
 		"JVM_XX_OPTS=" + strings.Join(xx, " "),
 		fmt.Sprintf("USE_AIKAR_FLAGS=%t", p.Aikar),
 	}
 	if w == WorkloadPack {
-		return append(env, "PACKWIZ_URL="+PackURL)
+		// spark rides alongside the pack too: without it there is no tick
+		// measurement for the workload that matters most. Its overhead is
+		// constant across profiles, so comparisons stay valid.
+		return append(env, "PACKWIZ_URL="+PackURL, "MODS="+SparkURL)
 	}
-	return append(env, "MODS="+ChunkyURL+","+FabricAPIURL)
+	return append(env, "MODS="+ChunkyURL+","+FabricAPIURL+","+SparkURL)
 }
 
 // Timeouts bound a single run. Exposed so tests need not wait on wall time.
@@ -111,6 +135,10 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 			_ = c.Exec(name, "rcon-cli", "chunky start")
 		}
 		if sc.Ready() {
+			// Ask spark for tick numbers on the same cadence as the resource
+			// sample. It replies into the log asynchronously, so the scanner
+			// picks it up on a later line and the newest reading wins.
+			_ = c.Exec(name, "rcon-cli", "spark tps")
 			if line, err := c.Stats(name); err == nil {
 				rss, _ := ParseMemUsage(statsField(line, 1))
 				cpu, _ := ParseCPUPerc(statsField(line, 0))
