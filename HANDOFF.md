@@ -1,8 +1,13 @@
 # Handoff
 
 Written so a fresh session can pick this up cold. Current as of **v0.2.0**,
-2026-08-18. If something here disagrees with reality, reality is right and this
-file is stale — check the live state first with the commands below.
+*last swept 2026-08-19*. If something here disagrees with reality, reality is
+right and this file is stale — check the live state first with the commands
+below.
+
+Superseded statements are marked in place rather than deleted, because the
+reason behind a reversed decision is the expensive part. See **Keeping these
+docs honest** in [CLAUDE.md](CLAUDE.md) for when to sweep and what to check.
 
 ## What exists right now
 
@@ -123,7 +128,12 @@ Expect ZGC to lose: it costs 10-15% CPU and there are two cores.
 
 ## What is next
 
-Phase 2, **the Discord design passes**, and it is deliberately not code. Five
+**Reordered 2026-08-19.** Pack development came first: `weloveyou-pack` now has
+`scripts/pack-dev.sh` (add/rm/check/play), so a mod change can be joined on a
+local server before anything is published. `wly bench` then grew from six
+profiles to an 18-profile JDK x collector matrix.
+
+Then phase 2, **the Discord design passes**, deliberately not code. Five
 surfaces need mockups before any bot is written, the get-started card first
 because it is where a new player either joins or gives up. The plan asks for
 2-3 distinct directions and real user input on each.

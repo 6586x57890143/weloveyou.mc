@@ -5,7 +5,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 ## What this is
 
 `weloveyou.mc` — the platform behind a Fabric modpack: a Dockerized Minecraft server, a
-Discord bot that is the entire front-end, and a squaremap live map served from Cloudflare R2.
+Discord bot that is the entire front-end, and a squaremap live map.
 
 **The modpack itself lives in a separate repository, `weloveyou-pack`** — pack channels, the
 Prism instance templates, and their publishing pipeline. This repo ships code; that one ships
@@ -20,8 +20,11 @@ Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
 **Status: phases 0, 1 and 3 done.** The server is live and joinable; the pack
-publishes to Cloudflare Pages; `wly bench` exists and has never been run for
-real. Next is phase 2, the Discord design passes.
+publishes to Cloudflare Pages. Phase 2 (the Discord design passes) was
+deliberately deferred in favour of the pack development loop, which lives in
+`weloveyou-pack` as `scripts/pack-dev.sh`.
+
+*Last swept 2026-08-19.* See **Keeping these docs honest** at the end.
 
 ## Commands
 
@@ -52,13 +55,16 @@ advisories that `govulncheck` fails CI on).
 ## Architecture
 
 ```
-cmd/wly/            server daemon — Discord bot, log bridge, RCON, R2 sync, bench harness
-cmd/wlyup/          player-side pack updater, single static binary
+cmd/wly/            server daemon — bench harness today; bot, log bridge and RCON later
+cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
+internal/bench/     JVM flag profiles, workload driver, result table
+
+PLANNED, NOT YET WRITTEN — this block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
 internal/mcevents/  PURE: log line -> event, one regex table per MC generation
-internal/bench/     JVM flag profiles, workload driver, result table
-worker/             Cloudflare Worker, R2 binding, read-only
+worker/             Cloudflare Worker, read-only
+
 deploy/             Dockerfile for wly, docker-compose.yml for mc + wly
 scripts/            CI helpers that must also run by hand
 ```
@@ -67,8 +73,11 @@ scripts/            CI helpers that must also run by hand
 Discord, no Docker, no network of their own. That is what makes them cheap to test to 95%
 and what would let `internal/packwiz` compile to `GOOS=js` if a browser use ever appears.
 
-**The Worker is read-only.** `wly` writes to R2 over the S3 API with a scoped token. There is
-deliberately no authenticated write path at the edge.
+**SUPERSEDED (commit `c98aefb`): there is no R2 and no Worker.** The pack is served from
+Cloudflare Pages and the map from squaremap's own webserver, so nothing was left for object
+storage to do. `WLY_R2_*` still passes through compose and nothing consumes it. The rule the
+Worker existed to encode survives and still applies if R2 ever returns: read-only at the
+edge, no authenticated write path.
 
 ## Decisions worth not relitigating
 
@@ -87,8 +96,8 @@ deliberately no authenticated write path at the edge.
   pinned `packwiz-installer.jar` run as a pre-launch step, so nothing unsigned is executed and
   SmartScreen never enters it. `cmd/wlyup` survives as an optional CLI and as insurance
   against packwiz-installer, which last shipped in April 2024.
-- **Pack releases never deploy anything.** The pack lives in R2; the server fetches it via
-  `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
+- **Pack releases never deploy anything.** The pack lives on Cloudflare Pages; the server
+  fetches it via `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
 
 ## Deployment
 
@@ -286,3 +295,34 @@ One combination is impossible rather than merely inert: **Graal does not support
 (`GraalError: Shenandoah garbage collector is not supported by Graal`). HotSpot accepts the
 flag and then the JIT disables itself, so a run that survived it would be measuring GraalVM
 with no Graal. That profile is declared and disabled.
+
+## Keeping these docs honest
+
+`CLAUDE.md` and `HANDOFF.md` are read cold by someone — or something — with no
+other context, so a stale line here is worse than a missing one: it is confidently
+wrong and gets acted on. Two rules.
+
+**Mark, do not silently delete.** When something is superseded, say so inline and
+say what replaced it, with the commit if you have it:
+
+```
+**SUPERSEDED (commit c98aefb): there is no R2 and no Worker.** ...
+PLANNED, NOT YET WRITTEN — this block described them as if they existed:
+```
+
+The reasoning behind a reversed decision is usually the expensive part, and
+deleting the line deletes the reason too. Someone will otherwise re-propose it.
+Delete only once the thing is gone AND nobody could reasonably re-propose it.
+
+**Sweep on a schedule, and stamp it.** Both files carry a `*Last swept <date>.*`
+line near the top. Re-read them whenever you finish a phase, and at minimum
+whenever you touch either file, checking specifically:
+
+- Does every path in the Architecture block exist? (Three did not, for weeks.)
+- Does the Status line match what actually shipped?
+- Do the Commands still run? Try them, do not assume.
+- Has an external fact moved — an image tag, a JDK default, a free tier, an
+  upstream that went unmaintained?
+
+Findings that cost real time belong in `HANDOFF.md` under the traps, not here.
+This file is the working reference; that one is the orientation.
