@@ -28,6 +28,17 @@ func Render(results []Result, host string, when time.Time) string {
 			continue
 		}
 		fmt.Fprintf(&b, "## %s\n\n", workloadTitle(w))
+		if n := modsOf(rows); n > 0 {
+			// The caveat is about the pack growing, so it belongs only on the
+			// pack workload. The control's count is Fabric API's nested jars
+			// plus the pregenerator and does not move on its own.
+			if w == WorkloadPack {
+				fmt.Fprintf(&b, "%d mods loaded. Rows are only comparable to other runs "+
+					"against a similar pack — this one grows.\n\n", n)
+			} else {
+				fmt.Fprintf(&b, "%d mods loaded (Fabric API and the pregenerator).\n\n", n)
+			}
+		}
 		b.WriteString("| profile | chunks/s | vs base | peak RSS | startup | GC p99 |\n")
 		b.WriteString("|---|---:|---:|---:|---:|---:|\n")
 		base := baselineOf(rows)
@@ -49,6 +60,17 @@ func workloadTitle(w Workload) string {
 		return "Workload A - vanilla worldgen (control)"
 	}
 	return "Workload B - the pack we actually ship"
+}
+
+// modsOf reports the mod count these rows were measured against, or 0 if no run
+// logged one. Every row in a workload runs the same pack, so the first is enough.
+func modsOf(rows []Result) int {
+	for _, r := range rows {
+		if n := r.Mods(); n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 func filter(rs []Result, w Workload) []Result {

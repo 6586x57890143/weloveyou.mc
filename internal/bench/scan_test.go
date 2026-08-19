@@ -151,3 +151,52 @@ func TestSelect(t *testing.T) {
 		t.Errorf("error should name the profile, got %q", err)
 	}
 }
+
+func TestParseLoadedMods(t *testing.T) {
+	tests := []struct {
+		name, line string
+		want       int
+		ok         bool
+	}{
+		{"fabric startup", "[main/INFO]: Loading 87 mods:", 87, true},
+		{"vanilla control", "[main/INFO]: Loading 1 mods:", 1, true},
+		{"unrelated line", "[main/INFO]: Done (12.3s)! For help, type \"help\"", 0, false},
+		{"no digits", "Loading mods", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseLoadedMods(tt.line)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("ParseLoadedMods(%q) = %d, %v; want %d, %v", tt.line, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestScannerRecordsModCount(t *testing.T) {
+	// Provenance for the pack workload: the pack is a skeleton now and will
+	// grow, so a row without a mod count invites a comparison that was never valid.
+	s := NewScanner(nil)
+	s.Feed("[main/INFO]: Loading 87 mods:")
+	if got := s.Run().Mods; got != 87 {
+		t.Errorf("Run().Mods = %d, want 87", got)
+	}
+}
+
+func TestResultModsIgnoresRunsThatNeverLogged(t *testing.T) {
+	res := Result{Runs: []Run{{Mods: 0}, {Mods: 87}}}
+	if got := res.Mods(); got != 87 {
+		t.Errorf("Mods() = %d, want 87", got)
+	}
+	if got := (Result{Runs: []Run{{}}}).Mods(); got != 0 {
+		t.Errorf("Mods() with nothing logged = %d, want 0", got)
+	}
+}
+
+func TestParseLoadedModsRejectsAnUnparseableCount(t *testing.T) {
+	// The regex guarantees digits but not that they fit in an int, and a
+	// mangled count would be worse than no count at all.
+	if got, ok := ParseLoadedMods("Loading 99999999999999999999 mods"); ok {
+		t.Errorf("ParseLoadedMods overflowed to %d instead of declining", got)
+	}
+}

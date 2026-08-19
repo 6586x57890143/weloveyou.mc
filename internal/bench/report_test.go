@@ -141,3 +141,51 @@ func TestBaselineOfFallsBackToFirstRow(t *testing.T) {
 		t.Errorf("baselineOf(nil) = %v, want 0", got)
 	}
 }
+
+func TestRenderStatesTheModCount(t *testing.T) {
+	// The pack is a skeleton and will grow. A row with no provenance invites a
+	// comparison against a future pack that was never valid, so the count and
+	// the caveat go in the output rather than in someone's memory.
+	res := []Result{{
+		Profile:  Baseline,
+		Workload: WorkloadPack,
+		Runs:     []Run{{Chunks: 100, Mods: 87, Elapsed: time.Second}},
+	}}
+	out := Render(res, "h", time.Unix(0, 0))
+	if !strings.Contains(out, "87 mods loaded") {
+		t.Errorf("report does not state the mod count:\n%s", out)
+	}
+	if !strings.Contains(out, "this one grows") {
+		t.Errorf("report does not warn the pack grows:\n%s", out)
+	}
+}
+
+func TestRenderOmitsModCountWhenUnknown(t *testing.T) {
+	// An old log with no Fabric line should print no count rather than "0 mods".
+	res := []Result{{
+		Profile:  Baseline,
+		Workload: WorkloadPack,
+		Runs:     []Run{{Chunks: 100, Elapsed: time.Second}},
+	}}
+	if out := Render(res, "h", time.Unix(0, 0)); strings.Contains(out, "0 mods loaded") {
+		t.Errorf("report invented a mod count:\n%s", out)
+	}
+}
+
+func TestRenderDoesNotWarnAboutPackGrowthOnTheControl(t *testing.T) {
+	// The control's mod count is Fabric API's nested jars plus the
+	// pregenerator; it does not grow with the pack, so the caveat would be
+	// wrong there. The first real sweep printed it under Workload A.
+	res := []Result{{
+		Profile:  Baseline,
+		Workload: WorkloadVanilla,
+		Runs:     []Run{{Chunks: 100, Mods: 43, Elapsed: time.Second}},
+	}}
+	out := Render(res, "h", time.Unix(0, 0))
+	if !strings.Contains(out, "43 mods loaded") {
+		t.Errorf("control should still state its count:\n%s", out)
+	}
+	if strings.Contains(out, "this one grows") {
+		t.Errorf("the pack-growth caveat does not belong on the control:\n%s", out)
+	}
+}

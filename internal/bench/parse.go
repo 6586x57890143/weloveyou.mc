@@ -76,6 +76,26 @@ func ParseMemUsage(s string) (float64, bool) {
 
 // ServerReady matches the line a Minecraft server prints once it is accepting
 // connections, and returns its startup duration.
+// Fabric announces its mod count at startup. It is recorded because it is the
+// only provenance marker the log gives for WHAT was benchmarked: the pack is a
+// skeleton today and will grow, so a pack-workload number is only comparable to
+// another taken against a similar pack. Without this, a future reader sees two
+// rows and no reason to distrust the comparison.
+var loadedMods = regexp.MustCompile(`Loading (\d+) mods`)
+
+// ParseLoadedMods returns the mod count from a Fabric startup line.
+func ParseLoadedMods(line string) (int, bool) {
+	m := loadedMods.FindStringSubmatch(line)
+	if m == nil {
+		return 0, false
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 var doneLine = regexp.MustCompile(`Done \(([\d.]+)s\)`)
 
 // ParseServerReady returns the startup duration and whether the line was the

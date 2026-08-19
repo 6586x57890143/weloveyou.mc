@@ -129,3 +129,86 @@ func TestJavaMajor(t *testing.T) {
 		}
 	}
 }
+
+const flagsetSample = `
+[flagsets]
+base = ["-XX:+UnlockExperimentalVMOptions", "-XX:+AlwaysPreTouch"]
+c2   = ["-XX:+UseVectorCmov"]
+g1   = ["-XX:+UseG1GC"]
+
+[profiles.hotspot]
+image    = "itzg/minecraft-server:java25"
+flagsets = ["base", "c2", "g1"]
+xx       = ["-XX:+UseCompactObjectHeaders"]
+
+[profiles.graal]
+image    = "itzg/minecraft-server:java25-graalvm"
+flagsets = ["base", "g1"]
+
+[profiles.plain]
+image = "itzg/minecraft-server:java21"
+xx    = ["-XX:+UseSerialGC"]
+`
+
+func TestFlagsetsResolve(t *testing.T) {
+	cfg, err := Parse([]byte(flagsetSample))
+	if err != nil {
+		t.Fatalf("Parse() = %v", err)
+	}
+	byName := map[string][]string{}
+	for _, p := range cfg.Profiles {
+		byName[p.Name] = p.XX
+	}
+
+	// Flagsets expand in order, and the profile's own xx comes last so it is
+	// the final word on a conflict.
+	want := []string{
+		"-XX:+UnlockExperimentalVMOptions", "-XX:+AlwaysPreTouch",
+		"-XX:+UseVectorCmov", "-XX:+UseG1GC", "-XX:+UseCompactObjectHeaders",
+	}
+	if got := byName["hotspot"]; !equalFlags(got, want) {
+		t.Errorf("hotspot flags = %v, want %v", got, want)
+	}
+
+	// The point of naming the sets: a Graal profile omits the C2-only one,
+	// because Graal replaces C2 and the JVM accepts those flags regardless, so
+	// the preflight would never drop them.
+	for _, f := range byName["graal"] {
+		if f == "-XX:+UseVectorCmov" {
+			t.Error("graal profile carries a C2-only flag it cannot use")
+		}
+	}
+
+	// A profile with no flagsets keeps its own xx untouched.
+	if got := byName["plain"]; !equalFlags(got, []string{"-XX:+UseSerialGC"}) {
+		t.Errorf("plain flags = %v", got)
+	}
+}
+
+func TestFlagsetsUnknownNameIsAnError(t *testing.T) {
+	// Silently expanding to nothing would measure the wrong configuration and
+	// still produce a plausible-looking row, which is the worst outcome.
+	_, err := Parse([]byte(`
+[flagsets]
+real = ["-XX:+UseG1GC"]
+
+[profiles.x]
+image    = "itzg/minecraft-server:java25"
+flagsets = ["real", "typo"]
+`))
+	if err == nil || !strings.Contains(err.Error(), `undefined flagset "typo"`) {
+		t.Fatalf("Parse() = %v, want an undefined-flagset error", err)
+	}
+}
+
+func equalFlags(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}

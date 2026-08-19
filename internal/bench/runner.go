@@ -26,8 +26,22 @@ const BenchSeed = "weloveyou-bench"
 // PackURL is the published stable channel, used by the pack workload.
 const PackURL = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"
 
-// ChunkyURL is the pregenerator, and the only mod the vanilla control loads.
-const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/UgPo4rtq/Chunky-Fabric-1.4.23.jar"
+// ChunkyURL is the pregenerator and the sweep's throughput instrument.
+//
+// Both URLs are the exact ones pack/stable ships, and must stay in step with it:
+// the pack repo's CI verifies every download URL resolves, which is the only
+// thing standing between a rotted pin and a sweep that measures nothing. The
+// first live run died on a stale Chunky version that had been replaced on the
+// CDN — same jar name, different version hash — and the failure arrived as
+// "server never reported ready", which names the symptom and not the cause.
+const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/RVFHfo1D/Chunky-Fabric-1.4.23.jar"
+
+// FabricAPIURL is Chunky's hard dependency. The vanilla control is still the
+// control: this is a library and the pregenerator, not content — but without it
+// the server refuses to start with "requires any version of fabric, which is
+// missing", which is the same class of bug deps-check.py exists to catch in the
+// pack repo and which nothing here was checking.
+const FabricAPIURL = "https://cdn.modrinth.com/data/P7dR8mSH/versions/Nlt8gI9z/fabric-api-0.116.15%2B1.21.1.jar"
 
 // Env builds the container environment for one profile and workload.
 func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
@@ -45,7 +59,7 @@ func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 	if w == WorkloadPack {
 		return append(env, "PACKWIZ_URL="+PackURL)
 	}
-	return append(env, "MODS="+ChunkyURL)
+	return append(env, "MODS="+ChunkyURL+","+FabricAPIURL)
 }
 
 // Timeouts bound a single run. Exposed so tests need not wait on wall time.

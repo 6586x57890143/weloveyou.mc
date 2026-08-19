@@ -10,3 +10,6 @@ coverage.out
 /deploy/data/
 /deploy/.env
 *.local.toml
+
+# Claude Code personal settings
+/.claude/settings.local.json

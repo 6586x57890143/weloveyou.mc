@@ -19,20 +19,55 @@ on:
         required: true
         default: both
         type: choice
-        # A = vanilla worldgen (control). B = the same run against the real
-        # pack. A flag that wins on A and loses on B is a finding, not noise.
-        options: [a, b, both]
+        # Workload A = vanilla worldgen (control). Workload B = the same run
+        # against the real pack. A flag that wins on A and loses on B is a
+        # finding, not noise.
+        #
+        # These must be the strings ParseWorkloads accepts, not the A/B labels:
+        # the options used to read [a, b, both], so picking anything but the
+        # default failed the sweep on the first command with "unknown workload".
+        options: [both, vanilla, pack]
       runs:
         description: "Repeats per profile — medians are reported, not single runs"
         required: false
         default: "3"
+      # The sweep is two passes. 18 profiles at full radius and 3 repeats is
+      # roughly 50 hours of a box that bills by the hour, so pass 1 screens the
+      # whole matrix cheaply and pass 2 confirms only what looked good:
+      #
+      #   screening     runs=1 radius=500  out=BENCHMARKS-screening.md
+      #   confirmation  runs=3 radius=1000 only=<winner>  out=BENCHMARKS.md
+      #
+      # These are inputs rather than an edit to this file because the two passes
+      # differ only in their arguments, and a workflow edit per pass would be a
+      # commit that says nothing.
+      radius:
+        description: "Chunky pregen radius — 500 to screen, 1000 to confirm"
+        required: false
+        default: "1000"
+      only:
+        description: "Run a single profile by name (blank = all enabled)"
+        required: false
+        default: ""
+      out:
+        description: "Output file — use BENCHMARKS-screening.md for a screening pass"
+        required: false
+        default: BENCHMARKS.md
   schedule:
     # Weekly. Frequent enough to catch a JDK or mod bump moving the numbers,
     # rare enough that the box is mostly available for playing on.
     - cron: "0 4 * * 1"
 
+# The sweep opens a PR with the numbers, which needs to push a branch and create
+# the PR. `contents: read` was enough while the sweep had never run; the first
+# real run died with "Permission to ... denied to github-actions[bot]" 403 after
+# the measurement was already done, throwing the result away.
+#
+# Still the minimum: no packages, no id-token, and a human merges. The sweep
+# proposes; it does not decide what the server runs on.
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: bench
@@ -51,29 +86,70 @@ jobs:
           cache: true
 
       - name: run the sweep
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
           go run ./cmd/wly bench \
             --workload "${{ github.event.inputs.workload || 'both' }}" \
             --runs "${{ github.event.inputs.runs || '3' }}" \
-            --out BENCHMARKS.md
+            --radius "${{ github.event.inputs.radius || '1000' }}" \
+            --only "${{ github.event.inputs.only || '' }}" \
+            --out "$OUT" \
+            --json "${OUT%.md}.json"
 
       # A human merges. The sweep proposes; it does not decide what the server
       # runs on.
       - name: open a PR when the numbers moved
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- BENCHMARKS.md; then
+          # --porcelain, not `git diff`: a screening pass writes a file that is
+          # not tracked yet, and `git diff` cannot see an untracked file, so the
+          # first screening run would silently propose nothing.
+          JSON="${OUT%.md}.json"
+          if [ -z "$(git status --porcelain -- "$OUT" "$JSON")" ]; then
             echo "no change in the numbers; nothing to propose"
             exit 0
           fi
           branch="bench/$(date -u +%Y%m%d-%H%M)"
           git switch -c "$branch"
-          git -c user.name=bench -c user.email=bench@local commit -am "bench: refresh BENCHMARKS.md"
+          git add -- "$OUT" "$JSON"
+          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
           git push origin "$branch"
-          gh pr create --fill --title "bench: JVM sweep $(date -u +%Y-%m-%d)" \
-            --body "Automated sweep. Review the medians before merging; anything under ~5% is noise."
+
+          # curl, not `gh`: this runs on the self-hosted bench box, which is a
+          # plain Ubuntu ARM VM with no gh CLI — the first real sweep died here
+          # with "gh: command not found" after the numbers were already
+          # measured. Installing gh would make the box's state a dependency of
+          # the workflow; the REST API is already available to any token.
+          python3 - "$branch" "$OUT" <<'PY' > /tmp/pr.json
+          import json, sys
+          branch, out = sys.argv[1], sys.argv[2]
+          json.dump({
+              "title": "bench: JVM sweep",
+              "head": branch,
+              "base": "main",
+              "body": (
+                  f"Automated sweep into `{out}`.\n\n"
+                  "Review the medians before merging; anything under ~5% is noise.\n"
+                  "A screening pass (runs=1) has no variance to report and must not "
+                  "be compared against confirmed numbers.\n"
+                  "The mod count each workload measured against is in the report — "
+                  "the pack grows, and rows taken against different packs are not "
+                  "comparable."
+              ),
+          }, sys.stdout)
+          PY
+
+          curl -sSf -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls" \
+            --data-binary @/tmp/pr.json \
+            | python3 -c "import json,sys; print('opened', json.load(sys.stdin)['html_url'])"
 
       # Always, including on failure: a crashed sweep that leaves the box running
       # costs more than the sweep did. An in-guest poweroff transitions the OCI

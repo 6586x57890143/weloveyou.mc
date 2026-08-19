@@ -17,6 +17,7 @@ const (
 // Run is one execution of one profile.
 type Run struct {
 	Chunks   int
+	Mods     int // as reported by Fabric; provenance for the pack workload
 	Elapsed  time.Duration
 	Startup  time.Duration
 	PeakRSS  float64 // bytes
@@ -53,6 +54,20 @@ func (res Result) PeakRSS() float64 {
 }
 func (res Result) Startup() float64 {
 	return Median(res.collect(func(r Run) float64 { return r.Startup.Seconds() }))
+}
+
+// Mods is the mod count the runs loaded. It is provenance, not a measurement:
+// the pack is a skeleton today and will gain gameplay mods, so a pack-workload
+// number is only comparable to another taken against a similar-sized pack.
+// Recording it means a future reader can see that for themselves rather than
+// comparing two rows that were never comparable.
+func (res Result) Mods() int {
+	for _, r := range res.Runs {
+		if r.Mods > 0 {
+			return r.Mods
+		}
+	}
+	return 0
 }
 
 // GCPause returns a percentile across every pause of every repeat. Pooling is

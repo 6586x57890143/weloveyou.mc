@@ -17,7 +17,7 @@
 # less coverable. That is the trade being recorded, not a red build made green.
 weloveyou-mc/cmd/wly              30
 weloveyou-mc/cmd/wlyup            70
-weloveyou-mc/internal/bench       98
+weloveyou-mc/internal/bench       99
 weloveyou-mc/internal/buildinfo   85
 
 # Across every package. Rises as the logic-heavy packages land; the plan's

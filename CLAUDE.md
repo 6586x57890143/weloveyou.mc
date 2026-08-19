@@ -5,7 +5,7 @@ Guidance for Claude Code (claude.ai/code) working in this repository.
 ## What this is
 
 `weloveyou.mc` — the platform behind a Fabric modpack: a Dockerized Minecraft server, a
-Discord bot that is the entire front-end, and a squaremap live map served from Cloudflare R2.
+Discord bot that is the entire front-end, and a squaremap live map.
 
 **The modpack itself lives in a separate repository, `weloveyou-pack`** — pack channels, the
 Prism instance templates, and their publishing pipeline. This repo ships code; that one ships
@@ -20,8 +20,11 @@ Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
 **Status: phases 0, 1 and 3 done.** The server is live and joinable; the pack
-publishes to Cloudflare Pages; `wly bench` exists and has never been run for
-real. Next is phase 2, the Discord design passes.
+publishes to Cloudflare Pages. Phase 2 (the Discord design passes) was
+deliberately deferred in favour of the pack development loop, which lives in
+`weloveyou-pack` as `scripts/pack-dev.sh`.
+
+*Last swept 2026-08-19.* See **Keeping these docs honest** at the end.
 
 ## Commands
 
@@ -52,13 +55,16 @@ advisories that `govulncheck` fails CI on).
 ## Architecture
 
 ```
-cmd/wly/            server daemon — Discord bot, log bridge, RCON, R2 sync, bench harness
-cmd/wlyup/          player-side pack updater, single static binary
+cmd/wly/            server daemon — bench harness today; bot, log bridge and RCON later
+cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
+internal/bench/     JVM flag profiles, workload driver, result table
+
+PLANNED, NOT YET WRITTEN — this block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
 internal/mcevents/  PURE: log line -> event, one regex table per MC generation
-internal/bench/     JVM flag profiles, workload driver, result table
-worker/             Cloudflare Worker, R2 binding, read-only
+worker/             Cloudflare Worker, read-only
+
 deploy/             Dockerfile for wly, docker-compose.yml for mc + wly
 scripts/            CI helpers that must also run by hand
 ```
@@ -67,8 +73,11 @@ scripts/            CI helpers that must also run by hand
 Discord, no Docker, no network of their own. That is what makes them cheap to test to 95%
 and what would let `internal/packwiz` compile to `GOOS=js` if a browser use ever appears.
 
-**The Worker is read-only.** `wly` writes to R2 over the S3 API with a scoped token. There is
-deliberately no authenticated write path at the edge.
+**SUPERSEDED (commit `c98aefb`): there is no R2 and no Worker.** The pack is served from
+Cloudflare Pages and the map from squaremap's own webserver, so nothing was left for object
+storage to do. `WLY_R2_*` still passes through compose and nothing consumes it. The rule the
+Worker existed to encode survives and still applies if R2 ever returns: read-only at the
+edge, no authenticated write path.
 
 ## Decisions worth not relitigating
 
@@ -87,8 +96,8 @@ deliberately no authenticated write path at the edge.
   pinned `packwiz-installer.jar` run as a pre-launch step, so nothing unsigned is executed and
   SmartScreen never enters it. `cmd/wlyup` survives as an optional CLI and as insurance
   against packwiz-installer, which last shipped in April 2024.
-- **Pack releases never deploy anything.** The pack lives in R2; the server fetches it via
-  `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
+- **Pack releases never deploy anything.** The pack lives on Cloudflare Pages; the server
+  fetches it via `PACKWIZ_URL` on restart. Only `wly` and compose changes touch the box.
 
 ## Deployment
 
@@ -136,6 +145,15 @@ A systemd timer on the production box writes `/var/lib/wly/cost.json` daily at
 Discord message. Credits run out quietly otherwise, and the first sign would be
 a stopped server. The file exists before the bot does precisely so the bot has
 nothing to invent when it lands.
+
+Until the bot exists, the box pushes the same numbers to the phone itself:
+`wly-cost.service` runs `cost-report.sh` as `ubuntu` and then
+`/opt/wly/bin/cost-push.sh` as `agent`, which renders the JSON to ntfy. It is
+deterministic — no LLM for three numbers — and escalates to high priority on a
+missing or null report, a report older than 36h, a day above 2x the month's
+running average, or a month-end projection above the budget (`WLY_COST_BUDGET`,
+default 5). A null amount is pushed as *unknown*, never as zero. The report now
+carries the API's own `currency` field, so nothing downstream has to assume EUR.
 
 Stop the bench box when it is not sweeping. Stopped instances bill only for the
 boot volume, so an idle bench box is pennies and a running one is not.
@@ -242,8 +260,69 @@ Two rules that are easy to get wrong:
    Trading slight instability for a measured gain is fine when the mitigation is a documented
    flag; shipping an unmeasured profile because it sounds fast is not.
 
+4. **The pack is a skeleton and will grow.** Today's `pack/stable` is Terralith, Oritech and
+   perf mods; gameplay mods are still to come. A workload-B number is only comparable to
+   another taken against a similar pack, so the report prints the mod count it measured and
+   says so. Do not compare a row from today against one taken after the pack doubles.
+5. **The sweep is two passes.** 18 profiles at full radius and 3 repeats is roughly 50 hours
+   of a box that bills by the hour. Screen the whole matrix at `--runs 1 --radius 500` into
+   `BENCHMARKS-screening.md`, then confirm the top few at full depth into `BENCHMARKS.md`.
+   A screening run has no variance to report, so the two files are never comparable.
+
 `jvm-profiles.toml` holds the candidates. Nothing in it is believed until it has a row in
 `BENCHMARKS.md`.
 
 `wly bench` preflights every flag with `java <flags> -version` and drops what the JVM
-rejects, so a flag removed by a future JDK degrades instead of failing the boot.
+rejects, so a flag removed by a future JDK degrades instead of failing the boot. It probes
+the whole set first and only falls back to one-at-a-time when the set is refused — which
+both costs one JVM start instead of thirty and keeps flags that are legal only in company
+(`-XX:NodeLimitFudgeFactor` must be 2-40% of `-XX:MaxNodeLimit`, so raising the limit alone
+is rejected while the pair is fine).
+
+**The preflight cannot catch a flag the JVM accepts and then ignores**, and that is a real
+category, not a hypothetical:
+
+- `{C2 product}` flags are inert on GraalVM, where `UseJVMCICompiler=true` means Graal
+  replaces C2. This is why `jvm-profiles.toml` splits `bruce-c2` into its own flagset.
+- x86-only flags (`-XX:+UseVectorCmov`, `-XX:+UseFastUnorderedTimeStamps`) do nothing on the
+  aarch64 bench box.
+- `-XX:InitiatingHeapOccupancyPercent` is only a starting value while `G1UseAdaptiveIHOP`
+  defaults to true.
+- Contrary to the plan's guess, `-XX:NmethodSweepActivity` is **not** in this category — it
+  is still a live `{product}` flag on JDK 25, accepted without warning.
+
+One combination is impossible rather than merely inert: **Graal does not support Shenandoah**
+(`GraalError: Shenandoah garbage collector is not supported by Graal`). HotSpot accepts the
+flag and then the JIT disables itself, so a run that survived it would be measuring GraalVM
+with no Graal. That profile is declared and disabled.
+
+## Keeping these docs honest
+
+`CLAUDE.md` and `HANDOFF.md` are read cold by someone — or something — with no
+other context, so a stale line here is worse than a missing one: it is confidently
+wrong and gets acted on. Two rules.
+
+**Mark, do not silently delete.** When something is superseded, say so inline and
+say what replaced it, with the commit if you have it:
+
+```
+**SUPERSEDED (commit c98aefb): there is no R2 and no Worker.** ...
+PLANNED, NOT YET WRITTEN — this block described them as if they existed:
+```
+
+The reasoning behind a reversed decision is usually the expensive part, and
+deleting the line deletes the reason too. Someone will otherwise re-propose it.
+Delete only once the thing is gone AND nobody could reasonably re-propose it.
+
+**Sweep on a schedule, and stamp it.** Both files carry a `*Last swept <date>.*`
+line near the top. Re-read them whenever you finish a phase, and at minimum
+whenever you touch either file, checking specifically:
+
+- Does every path in the Architecture block exist? (Three did not, for weeks.)
+- Does the Status line match what actually shipped?
+- Do the Commands still run? Try them, do not assume.
+- Has an external fact moved — an image tag, a JDK default, a free tier, an
+  upstream that went unmaintained?
+
+Findings that cost real time belong in `HANDOFF.md` under the traps, not here.
+This file is the working reference; that one is the orientation.

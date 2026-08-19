@@ -61,8 +61,103 @@ java25plus = [
 # ponytail: JFR over spark, revisit if a 1.21.1-compatible spark appears
 
 # ---------------------------------------------------------------------------
+# How the sweep is run
+# ---------------------------------------------------------------------------
+# `flagsets` composes the named lists below; a profile's own `xx` is applied
+# after them, so it is the last word on a conflict.
+#
+# Two passes, not one. The matrix below is 18 enabled profiles; at full radius
+# and 3 repeats that is roughly 50 hours of a box that costs money to run. So:
+#
+#   pass 1  screening     --runs 1 --radius 500 -out BENCHMARKS-screening.md
+#   pass 2  confirmation  --runs 3 --radius 1000 --only <winner>  -> BENCHMARKS.md
+#
+# A single run has no variance to report, which is exactly why pass 2 exists.
+# Never compare a screening number to a confirmed one.
+
+# ---------------------------------------------------------------------------
+# Flagsets
+# ---------------------------------------------------------------------------
+# From brucethemoose/Minecraft-Performance-Flags-Benchmarks, which is the best
+# sourced flag research that exists for Minecraft and is also four years old.
+# Split into named sets rather than kept as one blob, because parts of it do not
+# apply everywhere and the preflight cannot always tell us so:
+#
+#   - `java <flags> -version` catches flags the JVM REJECTS. Verified: it drops
+#     -XX:G1ConcRSHotCardLimit and -XX:G1ConcRefinementServiceIntervalMillis on
+#     JDK 25, which are fatal there rather than warnings. Both are omitted below
+#     rather than left for the preflight to strip on every single run.
+#   - It cannot catch flags the JVM ACCEPTS and then ignores. That is a real
+#     category, and the reason `bruce-c2` is separate: GraalVM sets
+#     UseJVMCICompiler=true, so Graal replaces C2 and every {C2 product} flag is
+#     inert there while still being accepted. Graal profiles omit that set.
+#
+# Deliberately not included anywhere:
+#   -XX:+UseVectorCmov               {C2 product} and x86-only; this box is aarch64.
+#   -XX:+UseFastUnorderedTimeStamps  x86 TSC.
+#   -XX:+UseLargePages               needs a privilege the container lacks.
+#   -XX:InitiatingHeapOccupancyPercent  G1UseAdaptiveIHOP defaults to true, which
+#                                    makes it a starting value only. Pinning it
+#                                    needs -XX:-G1UseAdaptiveIHOP; the guide
+#                                    predates adaptive IHOP being the default.
+
+[flagsets]
+# Compiler- and collector-neutral. Safe on every JDK in the matrix.
+bruce-common = [
+    "-XX:+UnlockExperimentalVMOptions",
+    "-XX:+UnlockDiagnosticVMOptions",
+    "-XX:+AlwaysActAsServerClassMachine",
+    "-XX:+AlwaysPreTouch",
+    "-XX:+DisableExplicitGC",
+    "-XX:NmethodSweepActivity=1",
+    "-XX:ReservedCodeCacheSize=400M",
+    "-XX:NonNMethodCodeHeapSize=12M",
+    "-XX:ProfiledCodeHeapSize=194M",
+    "-XX:NonProfiledCodeHeapSize=194M",
+    "-XX:-DontCompileHugeMethods",
+    "-XX:+PerfDisableSharedMem",
+    "-XX:AllocatePrefetchStyle=3",
+]
+
+# C2 only. Omitted on GraalVM, where Graal is the top-tier compiler instead.
+bruce-c2 = ["-XX:MaxNodeLimit=240000", "-XX:NodeLimitFudgeFactor=8000"]
+
+# G1, tuned. The two removed refinement flags are gone; see above.
+bruce-g1 = [
+    "-XX:+UseG1GC",
+    "-XX:MaxGCPauseMillis=37",
+    "-XX:G1HeapRegionSize=16M",
+    "-XX:G1NewSizePercent=23",
+    "-XX:G1ReservePercent=20",
+    "-XX:SurvivorRatio=32",
+    "-XX:G1MixedGCCountTarget=3",
+    "-XX:G1HeapWastePercent=20",
+    "-XX:MaxTenuringThreshold=1",
+    "-XX:G1SATBBufferEnqueueingThresholdPercent=30",
+    "-XX:G1ConcMarkStepDurationMillis=5.0",
+    "-XX:GCTimeRatio=99",
+]
+
+zgc-gen        = ["-XX:+UseZGC"]
+shenandoah-gen = ["-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational"]
+parallel       = ["-XX:+UseParallelGC"]
+serial         = ["-XX:+UseSerialGC"]
+coh            = ["-XX:+UseCompactObjectHeaders"]
+
+# ---------------------------------------------------------------------------
 # Profiles
 # ---------------------------------------------------------------------------
+# Two dimensions crossed: the JDK and the collector. Deliberately not
+# rectangular — compact object headers need 25 and generational Shenandoah needs
+# 24, so the 21 rows are shorter. That asymmetry is a finding, not an omission.
+#
+# itzg's java21 and java25 are Eclipse Temurin (21.0.11+10 and 25.0.3+9), so
+# Adoptium is already the base here. OpenJDK and Temurin are not two things to
+# measure: Temurin is a build of OpenJDK, and Oracle JDK is a third build of the
+# same source that differs in licensing rather than throughput. The vendor axis
+# that actually moves numbers is the compiler — HotSpot/C2 versus the Graal JIT
+# replacing C2 — which is why GraalVM gets rows and Oracle JDK does not.
+#
 # `image` is the itzg tag. `xx` goes to JVM_XX_OPTS, `opts` to JVM_OPTS.
 # `aikar = true` leaves USE_AIKAR_FLAGS on; a profile that brings its own
 # collector must turn it off, since Aikar's set is G1-specific.
@@ -71,6 +166,40 @@ java25plus = [
 description = "What ships today. The control every other row is measured against."
 image = "itzg/minecraft-server:java21"
 aikar = true
+
+[profiles.j21-g1-bruce]
+description = "The reference flag set on the JDK the game actually asks for."
+image = "itzg/minecraft-server:java21"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "bruce-g1"]
+
+[profiles.j21-parallel]
+description = """
+ParallelGC on two cores. Every published recommendation assumes a desktop with
+threads to spare for concurrent collection; this box has two. A stop-the-world
+collector that never steals a core from the tick loop may simply win here, and
+nobody publishes that number because nobody benchmarks on a 2-core VM.
+"""
+image = "itzg/minecraft-server:java21"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "parallel"]
+
+[profiles.j21-serial]
+description = "The same argument as Parallel, taken to its end. Cheap to include."
+image = "itzg/minecraft-server:java21"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "serial"]
+
+[profiles.j21-zgc]
+description = """
+Generational ZGC. Expect it to lose under a small heap on two cores and to pay
+off only well above it — the point is to find where the crossover actually is on
+this box, not to confirm folklore. Non-generational mode is gone (JEP 490) and
+-XX:+ZGenerational is obsolete in 25, so most published ZGC advice is stale.
+"""
+image = "itzg/minecraft-server:java21"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "zgc-gen"]
 
 [profiles.j25-g1]
 description = "Same collector, newer JDK. Isolates the cost or benefit of the JDK jump alone."
@@ -87,18 +216,31 @@ Minecraft numbers for it. This is the row worth running first.
 """
 image = "itzg/minecraft-server:java25"
 aikar = true
-xx = ["-XX:+UseCompactObjectHeaders"]
+flagsets = ["coh"]
 
-[profiles.j25-zgc]
-description = """
-Generational ZGC. Expect this to lose under a 16G heap and only start paying off
-above it — the point of running it is to find where the crossover actually is on
-our box, not to confirm folklore. Non-generational mode is gone (JEP 490) and
--XX:+ZGenerational is obsolete in 25, so most published ZGC advice is stale.
-"""
+[profiles.j25-g1-bruce-coh]
+description = "The reference flag set plus the headline candidate, on current Temurin."
 image = "itzg/minecraft-server:java25"
 aikar = false
-xx = ["-XX:+UseZGC", "-XX:+UseCompactObjectHeaders"]
+flagsets = ["bruce-common", "bruce-c2", "bruce-g1", "coh"]
+
+[profiles.j25-parallel-coh]
+description = "ParallelGC on two cores, with compact headers. See j21-parallel."
+image = "itzg/minecraft-server:java25"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "parallel", "coh"]
+
+[profiles.j25-serial-coh]
+description = "SerialGC with compact headers."
+image = "itzg/minecraft-server:java25"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "serial", "coh"]
+
+[profiles.j25-zgc]
+description = "Generational ZGC on 25, with compact headers. See j21-zgc."
+image = "itzg/minecraft-server:java25"
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "zgc-gen", "coh"]
 
 [profiles.j25-shenandoah-gen]
 description = """
@@ -107,7 +249,25 @@ kills server throughput" finding predates it entirely and deserves a fresh run.
 """
 image = "itzg/minecraft-server:java25"
 aikar = false
-xx = ["-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational", "-XX:+UseCompactObjectHeaders"]
+flagsets = ["bruce-common", "bruce-c2", "shenandoah-gen", "coh"]
+
+[profiles.j21-graalvm-g1-bruce]
+description = "Graal's JIT on 21, so the compiler is isolated from the JDK jump."
+image = "itzg/minecraft-server:java21-graalvm"
+aikar = false
+flagsets = ["bruce-common", "bruce-g1"]
+
+[profiles.j21-graalvm-parallel]
+description = "Graal's JIT with a stop-the-world collector, on two cores."
+image = "itzg/minecraft-server:java21-graalvm"
+aikar = false
+flagsets = ["bruce-common", "parallel"]
+
+[profiles.j21-graalvm-serial]
+description = "Graal's JIT, SerialGC."
+image = "itzg/minecraft-server:java21-graalvm"
+aikar = false
+flagsets = ["bruce-common", "serial"]
 
 [profiles.j25-graalvm-g1-coh]
 description = """
@@ -115,10 +275,51 @@ Oracle GraalVM's JIT, which used to be the paid tier and has been free under the
 GFTC since the JDK 17 release — so the old "20%+ on chunk generation, but you have
 to pay" caveat is gone. Chunk generation is exactly our workload, which makes this
 the second most interesting row after compact headers.
+
+The 20% figure comes from brucethemoose's own 2022 run (Benchmarks/2022-08-22
+jdk_ZGC_vs_Graal_G1: 45.44 fps against 36.78, GC stop time 30ms against 835ms).
+That was a CLIENT benchmark on JDK 17. It is why this earns rows, not evidence
+that it wins.
 """
 image = "itzg/minecraft-server:java25-graalvm"
 aikar = true
-xx = ["-XX:+UseCompactObjectHeaders"]
+flagsets = ["coh"]
+
+[profiles.j25-graalvm-g1-bruce-coh]
+description = "Graal's JIT with the tuned G1 set and compact headers."
+image = "itzg/minecraft-server:java25-graalvm"
+aikar = false
+flagsets = ["bruce-common", "bruce-g1", "coh"]
+
+[profiles.j25-graalvm-parallel-coh]
+description = "Graal's JIT, ParallelGC, compact headers."
+image = "itzg/minecraft-server:java25-graalvm"
+aikar = false
+flagsets = ["bruce-common", "parallel", "coh"]
+
+# Disabled because it cannot work, and the reason is the interesting part.
+# Verified against itzg/minecraft-server:java25-graalvm:
+#
+#   GraalError: Shenandoah garbage collector is not supported by Graal
+#   JVMCI compiler disabled after 11 of 11 upcalls had errors
+#
+# HotSpot accepts -XX:+UseShenandoahGC and then the Graal compiler fails on every
+# method and switches itself off. A run that survived this would be measuring
+# GraalVM with no Graal JIT — the worst kind of row, because it looks like a
+# GraalVM result. The preflight does catch it (java exits non-zero), so this is
+# belt and braces: the combination is simply not available.
+[profiles.j25-graalvm-shenandoah-gen]
+description = "Graal's JIT with generational Shenandoah. Impossible: Graal does not support Shenandoah."
+image = "itzg/minecraft-server:java25-graalvm"
+aikar = false
+flagsets = ["bruce-common", "shenandoah-gen", "coh"]
+enabled = false
+
+# ---------------------------------------------------------------------------
+# Declared but disabled: each needs an image that does not exist yet
+# ---------------------------------------------------------------------------
+# Kept rather than deleted because the reason each is unreachable is the useful
+# part, and rediscovering it would cost more than the lines do.
 
 # ponytail: JDK 26 has no itzg tag yet, so this needs a custom image or a
 # JAVA_VERSION override before it can run. Left declared and disabled rather than
@@ -128,7 +329,42 @@ xx = ["-XX:+UseCompactObjectHeaders"]
 description = "JDK 26. Requires --sun-misc-unsafe-memory-access=allow or mods throw."
 image = "itzg/minecraft-server:java26"   # does not exist yet
 aikar = true
-xx = ["-XX:+UseCompactObjectHeaders"]
+flagsets = ["coh"]
+enabled = false
+
+# ponytail: needs a custom multi-arch image. Build it only if GraalVM wins a
+# round — image plumbing before the JIT has earned it is the wrong order.
+[profiles.j252-graalvm-g1-bruce-coh]
+description = """
+GraalVM 25.2 (jvmci-25.2-b20). itzg's java25-graalvm ships Oracle GraalVM
+25.0.4+7.1 (jvmci-b01) — the same JDK with an older Graal compiler build. Worth a
+row only once GraalVM has beaten Temurin at all.
+"""
+image = "ghcr.io/6586x57890143/mc-graalvm:25.2"   # does not exist yet
+aikar = false
+flagsets = ["bruce-common", "bruce-g1", "coh"]
+enabled = false
+
+# ponytail: the same missing-image decision as above, and the lowest expected
+# value of the three: Oracle JDK is the same HotSpot source as Temurin.
+[profiles.oracle-jdk-25-g1-coh]
+description = "Oracle JDK 25. Expected to be indistinguishable from Temurin; included to prove it."
+image = "ghcr.io/6586x57890143/mc-oraclejdk:25"   # does not exist yet
+aikar = false
+flagsets = ["bruce-common", "bruce-c2", "bruce-g1", "coh"]
+enabled = false
+
+# ponytail: needs a custom image AND its own flagsets — none of the sets above
+# apply, since OpenJ9 is a different VM rather than a different build.
+[profiles.openj9-21]
+description = """
+Eclipse OpenJ9 / IBM Semeru. The only entry here likely to move a number, because
+it is a different VM: different collectors (gencon, balanced), different flags,
+famously lower memory. brucethemoose benchmarked it twice in 2022. Its flags share
+nothing with the sets above, which is why this carries none of them.
+"""
+image = "ghcr.io/6586x57890143/mc-semeru:21"   # does not exist yet
+aikar = false
 enabled = false
 
 # ---------------------------------------------------------------------------
