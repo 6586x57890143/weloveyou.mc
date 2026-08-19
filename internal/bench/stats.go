@@ -40,7 +40,7 @@ func Percentile(xs []float64, p float64) float64 {
 const NoiseFloor = 0.05
 
 // RelChange is the signed relative change from baseline to value. Positive
-// means larger, which is better for throughput and worse for memory — the
+// means larger, which is better for throughput and worse for memory, the
 // caller knows which way is up for its metric.
 func RelChange(baseline, value float64) float64 {
 	if baseline == 0 {

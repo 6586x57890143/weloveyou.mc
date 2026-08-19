@@ -2,7 +2,7 @@
 #
 # Ratchet-only: raise a floor when a package earns it, never lower one to make
 # a red build green. A package listed here that no longer exists is an error,
-# not a skip — that is how a deleted or renamed package gets noticed.
+# not a skip. That is how a deleted or renamed package gets noticed.
 #
 # Targets from the plan, applied as each package lands:
 #   internal/packwiz  95   it deletes files on player machines

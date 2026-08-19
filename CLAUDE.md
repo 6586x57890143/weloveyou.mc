@@ -2,27 +2,28 @@
 
 Guidance for Claude Code (claude.ai/code) working in this repository.
 
-## What this is
+## What this is 💖
 
-`weloveyou.mc` — the platform behind a Fabric modpack: a Dockerized Minecraft server, a
-Discord bot that is the entire front-end, and a squaremap live map.
+`weloveyou.mc` is the machinery behind a Fabric modpack: a Dockerized Minecraft server,
+a Discord bot doing all the front-end work, and a squaremap live map. It's a hobby
+project for a small server, so most of the choices here optimise for "one person can
+still understand this in six months" over anything else.
 
-**The modpack itself lives in a separate repository, `weloveyou-pack`** — pack channels, the
-Prism instance templates, and their publishing pipeline. This repo ships code; that one ships
-content. Split because the cadences differ: a pack release is weekly and touches no Go.
+**The modpack itself lives next door in `weloveyou-pack`**: pack channels, the Prism
+instance templates, and the publishing pipeline. Code here, content there. They're split
+because they move at different speeds, a pack release happens most weeks and never
+touches any Go.
 
-**Start with [HANDOFF.md](HANDOFF.md)** if you are picking this up cold. It has
-the live state, how a change reaches players, the traps that have already cost
-time, and what is next. This file is the working reference; that one is the
-orientation.
+**If you're picking this up cold, read [HANDOFF.md](HANDOFF.md) first.** It covers what's
+actually running, how a change reaches players, and which traps have already eaten an
+afternoon. This file is the day-to-day reference, that one gets you oriented.
 
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phases 0, 1 and 3 done.** The server is live and joinable; the pack
-publishes to Cloudflare Pages. Phase 2 (the Discord design passes) was
-deliberately deferred in favour of the pack development loop, which lives in
-`weloveyou-pack` as `scripts/pack-dev.sh`.
+**Status: phases 0, 1 and 3 done.** Server is live and joinable, pack publishes to
+Cloudflare Pages. Phase 2 (the Discord design passes) got pushed back in favour of the
+pack development loop, which now lives in `weloveyou-pack` as `scripts/pack-dev.sh`.
 
 *Last swept 2026-08-19.* See **Keeping these docs honest** at the end.
 
@@ -37,7 +38,7 @@ go test ./...
 go vet ./...
 gofmt -l cmd internal              # must print nothing
 
-scripts/coverage.sh                # enforce .coverage-floors — the CI gate
+scripts/coverage.sh                # enforce .coverage-floors, the CI gate
 scripts/coverage.sh --report       # same table, always exit 0
 
 go run ./cmd/wly version
@@ -46,7 +47,7 @@ go run ./cmd/wlyup version
 docker compose -f deploy/docker-compose.yml up -d    # needs deploy/.env
 ```
 
-`go test -race` needs a C toolchain and **there is no gcc on this machine** — it runs on the
+`go test -race` needs a C toolchain and **there is no gcc on this machine**: it runs on the
 CI runners, which have one. Do not take a local `-race` failure at face value.
 
 Requires Go 1.26.6 (`go.mod` pins it; 1.26.4 and .5 carry `crypto/tls` and `net/http`
@@ -55,12 +56,12 @@ advisories that `govulncheck` fails CI on).
 ## Architecture
 
 ```
-cmd/wly/            server daemon — bench harness today; bot, log bridge and RCON later
+cmd/wly/            server daemon, bench harness today; bot, log bridge and RCON later
 cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
 internal/bench/     JVM flag profiles, workload driver, result table
 
-PLANNED, NOT YET WRITTEN — this block described them as if they existed:
+PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
 internal/mcevents/  PURE: log line -> event, one regex table per MC generation
 worker/             Cloudflare Worker, read-only
@@ -82,7 +83,7 @@ edge, no authenticated write path.
 ## Decisions worth not relitigating
 
 - **wly speaks the Docker Engine API over the mounted socket**, rather than shelling out to
-  `docker compose`. The image is distroless — no shell, no docker CLI — and restart, stop and
+  `docker compose`. The image is distroless (no shell, no docker CLI), and restart, stop and
   inspect are three endpoints over a unix socket: about forty lines with stdlib `net/http`
   and a custom dialer. Cheaper than either fattening the image or adding the docker client
   library. This supersedes the plan, which said `os/exec`.
@@ -90,7 +91,7 @@ edge, no authenticated write path.
   Docker dependency for the hot path, and no mod to keep ported across MC versions.
 - **Fabric-only, so no Create.** Create Fabric stopped at 1.20.1 and the 1.21.1 port branch
   died in March 2025. `stable` is 1.21.1 with Oritech as the tech spine. Create Fly is a live
-  Fabric fork of Create for 26.2, but it has no addon ecosystem — an `edge` question, not a
+  Fabric fork of Create for 26.2, but it has no addon ecosystem. That makes it an `edge` question, not a
   `stable` one.
 - **Players install through Prism Launcher, not a binary we ship.** The instance zip carries a
   pinned `packwiz-installer.jar` run as a pre-launch step, so nothing unsigned is executed and
@@ -122,7 +123,7 @@ be influenced by the caller. Verified: `rm -rf /`, `deploy ../../etc/passwd` and
 /srv/app/deploy/.env         secrets. gitignored, so `git checkout --force` never touches it.
 ```
 
-Rolling back is `WLY_IMAGE=ghcr.io/…:vX.Y.Z` in `.env` plus a redeploy — no rebuild, no revert.
+Rolling back is `WLY_IMAGE=ghcr.io/…:vX.Y.Z` in `.env` plus a redeploy, no rebuild, no revert.
 
 `docker compose pull` runs before `up` because `up` alone will happily keep a stale local
 image that shares a tag with a newer remote one, which would make a deploy silently do nothing.
@@ -141,7 +142,7 @@ A systemd timer on the production box writes `/var/lib/wly/cost.json` daily at
  "by_service": {"compute": 0.0338}}
 ```
 
-**wly must surface this in its push notifications** — a spend line in the daily
+**wly must surface this in its push notifications**: a spend line in the daily
 Discord message. Credits run out quietly otherwise, and the first sign would be
 a stopped server. The file exists before the bot does precisely so the bot has
 nothing to invent when it lands.
@@ -149,7 +150,7 @@ nothing to invent when it lands.
 Until the bot exists, the box pushes the same numbers to the phone itself:
 `wly-cost.service` runs `cost-report.sh` as `ubuntu` and then
 `/opt/wly/bin/cost-push.sh` as `agent`, which renders the JSON to ntfy. It is
-deterministic — no LLM for three numbers — and escalates to high priority on a
+deterministic (no LLM for three numbers) and escalates to high priority on a
 missing or null report, a report older than 36h, a day above 2x the month's
 running average, or a month-end projection above the budget (`WLY_COST_BUDGET`,
 default 5). A null amount is pushed as *unknown*, never as zero. The report now
@@ -164,8 +165,8 @@ boot volume, so an idle bench box is pennies and a running one is not.
 which is where the OCI credential lives. One command, and it encodes the thing
 that cost an afternoon to learn:
 
-**A1 is almost always "Out of host capacity" for a NEW instance** — all three
-Frankfurt ADs refused — **but A2 has capacity, and converting an existing A2 to
+**A1 is almost always "Out of host capacity" for a NEW instance**: all three
+Frankfurt ADs refused, **but A2 has capacity, and converting an existing A2 to
 A1 succeeds.** So the script launches A1 first, falls back to A2, and converts.
 
 The conversion needs a stopped instance and is asynchronous: for a minute or two
@@ -191,7 +192,7 @@ oci compute instance action --instance-id <ocid> --action START   # retry while 
 
 - `bench.yml` powers the box off as its last step, `if: always()`, so a crashed
   sweep does not bill for a week. An in-guest poweroff moves the OCI instance to
-  STOPPED, which is what stops billing — only the boot volume is charged then.
+  STOPPED, which is what stops billing. Only the boot volume is charged after that.
 - `wly-bench-up.timer` starts it Mondays 03:45 UTC, before the 04:00 sweep. A
   stopped runner means GitHub queues the job rather than running it.
 - `wly-bench-idle.timer` stops it nightly at 23:30 UTC, in case the sweep never
@@ -201,7 +202,7 @@ oci compute instance action --instance-id <ocid> --action START   # retry while 
 
 `wly.toml` carries each channel's `pack_url` so the daemon can poll it for releases.
 `weloveyou-pack` carries the same URL in its `channels.toml`, because its instance builder
-substitutes it into `instance.cfg`. One hostname, written twice, deliberately — the
+substitutes it into `instance.cfg`. One hostname, written twice, deliberately. The
 alternative is a shared config repo, which is more machinery than a hostname is worth.
 
 If a channel's URL changes, both must change. Nothing enforces that automatically; it is one
@@ -219,7 +220,7 @@ of the few places the split costs something.
   codec by default and will silently mangle every em-dash into a byte no UTF-8 parser
   accepts. If Python is unavoidable, pass `encoding="utf-8", newline="\n"`.
 - **CI uses no third-party actions** outside `actions/*` and `dependabot/fetch-metadata`.
-  Release workflows hold write access to the repo and registry — every action they run is
+  Release workflows hold write access to the repo and registry, every action they run is
   part of this project's supply chain. Everything else is plain CLI.
 - **Coverage floors ratchet upward only.** Raise a floor when a package earns it; never lower
   one to make a red build green. `.coverage-floors` carries the reasoning.
@@ -231,18 +232,18 @@ of the few places the split costs something.
 
 `.coverage-floors` is the contract. Beyond the number:
 
-- Table-driven tests everywhere — adding the 26.2 log format should be a row, not a function.
+- Table-driven tests everywhere: adding the 26.2 log format should be a row, not a function.
 - Fuzz every parser. A malformed remote `pack.toml` must never panic on a player machine.
 - Golden JSON files for every Discord surface, so a layout change is a reviewable diff rather
   than a surprise in the channel.
 - `httptest` for all remote fetches. No test touches the network.
-- Integration tests behind `-tags integration` — real container, real RCON, real log tail.
+- Integration tests behind `-tags integration`: real container, real RCON, real log tail.
 - `-race` on everything (CI only, see above).
 
 ## Benchmarking
 
 JVM flags are measured, not inherited. Base reference is
-`brucethemoose/Minecraft-Performance-Flags-Benchmarks`, four years stale — several of its
+`brucethemoose/Minecraft-Performance-Flags-Benchmarks`, four years stale, several of its
 conclusions need re-testing (the ZGC section is obsolete; compact object headers did not
 exist).
 
@@ -263,14 +264,14 @@ Two rules that are easy to get wrong:
 4. **The bench box must be boring, and Ubuntu's defaults are not.**
    `apt-daily.timer` and `apt-daily-upgrade.timer` are `OnCalendar=6:00` with
    `Persistent=true`. A box powered off except when sweeping therefore fires the
-   *missed* 06:00 run shortly after every boot — which is precisely when a sweep is
+   *missed* 06:00 run shortly after every boot, which is precisely when a sweep is
    running. Measured: booted 13:52, `apt-daily-upgrade` started 14:22:57, sweep
    cancelled 14:25:25, and that run consumed **4min 7s of CPU on two cores**.
    The cancelled job was the visible half; the invisible half is a profile measured
    against apt using both cores, which yields a plausible and wrong number.
    Masked via `bench-admin.yml -> quiet-timers`; re-run it after reprovisioning,
    because `provision-box.sh` is not version controlled. `sysstat-collect` is left
-   alone on purpose — ten-minutely CPU history is evidence, not noise.
+   alone on purpose, ten-minutely CPU history is evidence, not noise.
 5. **The pack is a skeleton and will grow.** Today's `pack/stable` is Terralith, Oritech and
    perf mods; gameplay mods are still to come. A workload-B number is only comparable to
    another taken against a similar pack, so the report prints the mod count it measured and
@@ -285,7 +286,7 @@ Two rules that are easy to get wrong:
 
 `wly bench` preflights every flag with `java <flags> -version` and drops what the JVM
 rejects, so a flag removed by a future JDK degrades instead of failing the boot. It probes
-the whole set first and only falls back to one-at-a-time when the set is refused — which
+the whole set first and only falls back to one-at-a-time when the set is refused, which
 both costs one JVM start instead of thirty and keeps flags that are legal only in company
 (`-XX:NodeLimitFudgeFactor` must be 2-40% of `-XX:MaxNodeLimit`, so raising the limit alone
 is rejected while the pair is fine).
@@ -299,7 +300,7 @@ category, not a hypothetical:
   aarch64 bench box.
 - `-XX:InitiatingHeapOccupancyPercent` is only a starting value while `G1UseAdaptiveIHOP`
   defaults to true.
-- Contrary to the plan's guess, `-XX:NmethodSweepActivity` is **not** in this category — it
+- Contrary to the plan's guess, `-XX:NmethodSweepActivity` is **not** in this category, it
   is still a live `{product}` flag on JDK 25, accepted without warning.
 
 One combination is impossible rather than merely inert: **Graal does not support Shenandoah**
@@ -309,7 +310,7 @@ with no Graal. That profile is declared and disabled.
 
 ## Keeping these docs honest
 
-`CLAUDE.md` and `HANDOFF.md` are read cold by someone — or something — with no
+`CLAUDE.md` and `HANDOFF.md` are read cold by someone, or something, with no
 other context, so a stale line here is worse than a missing one: it is confidently
 wrong and gets acted on. Two rules.
 
@@ -318,7 +319,7 @@ say what replaced it, with the commit if you have it:
 
 ```
 **SUPERSEDED (commit c98aefb): there is no R2 and no Worker.** ...
-PLANNED, NOT YET WRITTEN — this block described them as if they existed:
+PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 ```
 
 The reasoning behind a reversed decision is usually the expensive part, and
@@ -332,7 +333,7 @@ whenever you touch either file, checking specifically:
 - Does every path in the Architecture block exist? (Three did not, for weeks.)
 - Does the Status line match what actually shipped?
 - Do the Commands still run? Try them, do not assume.
-- Has an external fact moved — an image tag, a JDK default, a free tier, an
+- Has an external fact moved: an image tag, a JDK default, a free tier, an
   upstream that went unmaintained?
 
 Findings that cost real time belong in `HANDOFF.md` under the traps, not here.

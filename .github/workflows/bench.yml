@@ -28,7 +28,7 @@ on:
         # default failed the sweep on the first command with "unknown workload".
         options: [both, vanilla, pack]
       runs:
-        description: "Repeats per profile — medians are reported, not single runs"
+        description: "Repeats per profile, medians are reported, not single runs"
         required: false
         default: "3"
       # The sweep is two passes. 18 profiles at full radius and 3 repeats is
@@ -42,7 +42,7 @@ on:
       # differ only in their arguments, and a workflow edit per pass would be a
       # commit that says nothing.
       radius:
-        description: "Chunky pregen radius — 500 to screen, 1000 to confirm"
+        description: "Chunky pregen radius, 500 to screen, 1000 to confirm"
         required: false
         default: "1000"
       only:
@@ -50,7 +50,7 @@ on:
         required: false
         default: ""
       out:
-        description: "Output file — use BENCHMARKS-screening.md for a screening pass"
+        description: "Output file, use BENCHMARKS-screening.md for a screening pass"
         required: false
         default: BENCHMARKS.md
   schedule:
@@ -127,7 +127,7 @@ jobs:
           # click is the wrong trade, and the results still need a human to read
           # them before they mean anything.
           #
-          # (The attempt before that died on `gh: command not found` — this box
+          # (The attempt before that died on `gh: command not found`, this box
           # is a plain Ubuntu ARM VM. Neither tool is needed now.)
           {
             echo "### sweep finished"
@@ -139,7 +139,7 @@ jobs:
             echo "Anything under ~5% is noise. A screening pass (runs=1) has no"
             echo "variance to report and must not be compared against confirmed"
             echo "numbers. The mod count each workload measured against is in the"
-            echo "report — the pack grows, and rows taken against different packs"
+            echo "report, the pack grows, and rows taken against different packs"
             echo "are not comparable."
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -1,18 +1,19 @@
-# Handoff
+# Handoff 💖
 
-Written so a fresh session can pick this up cold. Current as of **v0.2.0**,
-*last swept 2026-08-19*. If something here disagrees with reality, reality is
-right and this file is stale — check the live state first with the commands
-below.
+Notes for whoever picks this up next, including future me. Current as of
+**v0.2.0**, *last swept 2026-08-19*. If anything here disagrees with reality,
+reality wins and this file is stale, so check the live state with the commands
+below before believing it.
 
-Superseded statements are marked in place rather than deleted, because the
-reason behind a reversed decision is the expensive part. See **Keeping these
-docs honest** in [CLAUDE.md](CLAUDE.md) for when to sweep and what to check.
+When something gets superseded it's marked in place instead of deleted. The
+reasoning behind a reversed decision is usually the expensive bit, and deleting
+the line deletes the reason too. See **Keeping these docs honest** in
+[CLAUDE.md](CLAUDE.md) for when to sweep and what to look at.
 
 ## What exists right now
 
 A joinable modded Minecraft server, a pack that publishes itself, and a
-benchmark harness that has never been run for real.
+benchmark harness that has finally started producing numbers.
 
 | Thing | Where | State |
 |---|---|---|
@@ -51,7 +52,7 @@ weloveyou-pack   tag stable-v* -> validate -> deps -> smoke boot -> wrangler -> 
 A pack release deploys nothing. The server picks it up on its next restart and
 players on their next launch. That is the whole point of the split.
 
-**Tagging** (annotated only — `--verify-tag` rejects lightweight tags):
+**Tagging** (annotated only, `--verify-tag` rejects lightweight tags):
 
 ```bash
 git tag -a v0.2.1 -m "..."          && git push origin v0.2.1        # platform
@@ -74,11 +75,11 @@ this way:
 
 Three gates now catch these, all in the pack repo's CI:
 
-- `scripts/pack-check.sh` — every entry declares a side, index is fresh
-- `scripts/deps-check.py` — every declared dependency is satisfied *per side*,
+- `scripts/pack-check.sh`, every entry declares a side, index is fresh
+- `scripts/deps-check.py`, every declared dependency is satisfied *per side*,
   descending into nested jars (Fabric API bundles, and C2ME hides its java
   requirement inside `c2me-opts-natives-math`)
-- `scripts/smoke-boot.sh` — boots a real Java 25 server and requires `Done (`
+- `scripts/smoke-boot.sh`, boots a real Java 25 server and requires `Done (`
 
 Each was verified by reverting the real bug and watching it fail.
 
@@ -92,14 +93,14 @@ Each was verified by reverting the real bug and watching it fail.
   The conversion is asynchronous and reports the old shape while it lands, which
   looks exactly like a failure.
 - **Stopping an OCI instance is a small gamble** on getting it back.
-- **Both repos are public** so Actions is free — and `weloveyou.mc` has a
+- **Both repos are public** so Actions is free, and `weloveyou.mc` has a
   self-hosted runner. That is safe only because nothing a fork can trigger
   targets it. `scripts/check-runners.py` enforces it. Never add `pull_request`
   to `bench.yml`.
 - **Writing files from Windows**: use bash heredocs. Python's `write_text` uses
   the locale codec and mangles em-dashes into bytes no YAML parser accepts; it
   cost two broken pushes. Backticks in `git commit -m "..."` get shell-expanded
-  — use `git commit -F -` with a quoted heredoc.
+  , use `git commit -F -` with a quoted heredoc.
 - **The exec bit does not survive a Windows checkout.** New scripts need
   `git update-index --chmod=+x`.
 
@@ -110,7 +111,7 @@ produced a number**. The open question it exists to answer:
 
 > Does `-XX:+UseCompactObjectHeaders` help a modded Minecraft server? JEP 519
 > went production in JDK 25, claims 22% less heap on SPECjbb, and Minecraft is
-> the archetypal small-object workload — FerriteCore exists because of it. No
+> the archetypal small-object workload, FerriteCore exists because of it. No
 > published Minecraft numbers exist that I could find.
 
 It ships **on** in production today because it is a supported production
@@ -139,7 +140,7 @@ because it is where a new player either joins or gives up. The plan asks for
 2-3 distinct directions and real user input on each.
 
 Then phases 4-6: `internal/packwiz` (Load + Diff only), `internal/mcevents`,
-then `cmd/wly serve` — the bot, the event bridge, the status board.
+then `cmd/wly serve`: the bot, the event bridge and the status board.
 
 `wly serve` is still a stub that exits immediately, which is why the `wly`
 service sits behind a `bot` compose profile and does not start.

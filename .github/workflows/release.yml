@@ -124,7 +124,7 @@ jobs:
           {
             echo "## wlyup ${TAG}"
             echo
-            echo "The weloveyou pack updater. Single static binary — no Java, no launcher"
+            echo "The weloveyou pack updater. Single static binary, no Java, no launcher"
             echo "plugin. It reads the published packwiz index and brings your install in"
             echo "line with it."
             echo
@@ -200,7 +200,7 @@ jobs:
   # Only wly and compose changes reach the box. A pack release does not deploy
   # anything: the pack lives in R2 and wly restarts the server to pick it up.
   #
-  # The box is reachable only over the tailnet — its deploy key carries
+  # The box is reachable only over the tailnet, its deploy key carries
   # from="100.64.0.0/10,...", so a connection from a public runner IP is refused
   # even with the right key. So the runner joins the tailnet, deploys, and leaves.
   #
@@ -217,7 +217,7 @@ jobs:
     if: vars.DEPLOY_HOST != ''
     environment: production
     steps:
-      # Tailscale's own apt repository, verified by their signing key — not a
+      # Tailscale's own apt repository, verified by their signing key, not a
       # third-party action. This workflow holds contents:write and packages:write,
       # so everything it runs is part of this project's supply chain.
       - name: install tailscale

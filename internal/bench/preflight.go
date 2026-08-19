@@ -20,7 +20,7 @@ type Prober func(image string, flags []string) error
 // of -XX:MaxNodeLimit, so raising MaxNodeLimit alone is rejected against the
 // default fudge factor while the pair together is accepted. Without the retry,
 // preflight drops half of an interdependent pair and the sweep then measures a
-// configuration nobody asked for — worse than either keeping or dropping both,
+// configuration nobody asked for, worse than either keeping or dropping both,
 // because the row still looks plausible.
 func Preflight(image string, flags []string, probe Prober) (ok, dropped []string) {
 	// Ask about the whole set first. When it is accepted there is nothing to
@@ -39,7 +39,7 @@ func Preflight(image string, flags []string, probe Prober) (ok, dropped []string
 }
 
 // Unlockers must precede any experimental or diagnostic flag, or the JVM
-// rejects it for being locked rather than for being unknown — which would make
+// rejects it for being locked rather than for being unknown, which would make
 // preflight drop perfectly good flags.
 var Unlockers = []string{"-XX:+UnlockExperimentalVMOptions", "-XX:+UnlockDiagnosticVMOptions"}
 

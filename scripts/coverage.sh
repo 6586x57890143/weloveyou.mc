@@ -6,7 +6,7 @@
 #   scripts/coverage.sh --report     # print the table, exit 0 regardless
 #
 # Floors ratchet upward only. When a package comfortably clears its floor,
-# raise the floor in the same PR — that is what stops coverage sliding back.
+# raise the floor in the same PR, that is what stops coverage sliding back.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -51,7 +51,7 @@ while read -r name floor; do
     have=$(printf '%s\n' "$pkg_cov" | awk -v p="$name" '$1 == p { print $2 }')
     if [ -z "$have" ]; then
       printf '%-42s %8s %8s  MISSING\n' "$name" "-" "$floor"
-      echo "::error::$name has a coverage floor but produced no coverage — was it deleted or renamed?"
+      echo "::error::$name has a coverage floor but produced no coverage, was it deleted or renamed?"
       fail=1
       continue
     fi

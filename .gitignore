@@ -6,7 +6,7 @@
 /wlyup.exe
 coverage.out
 
-# Local runtime state — never committed
+# Local runtime state, never committed
 /deploy/data/
 /deploy/.env
 *.local.toml

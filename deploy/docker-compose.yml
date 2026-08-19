@@ -5,7 +5,7 @@
 #
 # The pack is not baked into the image. itzg fetches it from PACKWIZ_URL at
 # start, honouring each entry's `side`, so a pack release needs no rebuild and
-# no deploy — only a restart.
+# no deploy, only a restart.
 
 services:
   mc:
@@ -29,7 +29,7 @@ services:
 
       # Java 25, not the 21 that 1.21.1 merely requires. C2ME's natives-math
       # module refuses to load on anything older, and compact object headers
-      # (JEP 519) do not exist before 25 — which is the largest memory lever
+      # (JEP 519) do not exist before 25, which is the largest memory lever
       # available to a heavily modded server and is measured in jvm-profiles.toml.
       #
       # Running an older pack on a newer JDK is a known flag, not a gamble:
@@ -43,12 +43,12 @@ services:
         --illegal-native-access=allow
         ${MC_JVM_OPTS:-}
       # G1 with Aikar's tuning is the right default under a 16G heap. Any other
-      # profile is JVM_XX_OPTS, never a code change — see BENCHMARKS.md.
+      # profile is JVM_XX_OPTS, never a code change, see BENCHMARKS.md.
       USE_AIKAR_FLAGS: "true"
       # Baseline from brucethemoose/Minecraft-Performance-Flags-Benchmarks, on
       # top of Aikar's G1 tuning above. Every flag here was preflighted against
       # this exact image with `java <flag> -version` on aarch64 rather than
-      # copied on faith — the guide is four years old and several of its flags
+      # copied on faith, the guide is four years old and several of its flags
       # target JDKs and CPUs that have moved on.
       #
       # Dropped from the published set: -XX:+UseNUMA, which fails to initialise
@@ -58,7 +58,7 @@ services:
       # production in 25): 8-byte headers instead of 12/16. It matters most
       # exactly here, where there are 2 cores to collect with and heap pressure
       # is the binding constraint. It is still the first thing to A/B in
-      # jvm-profiles.toml — shipped on because it is a supported production
+      # jvm-profiles.toml, shipped on because it is a supported production
       # feature, not because it has been measured on this pack.
       JVM_XX_OPTS: >-
         -XX:+UnlockExperimentalVMOptions
@@ -91,7 +91,7 @@ services:
       # Seeds only. EXISTING_WHITELIST_FILE is deliberately left at itzg's
       # default of SKIP rather than SYNCHRONIZE: with SYNCHRONIZE the env var
       # becomes authoritative and every restart discards names added at runtime
-      # — which would silently break the `/whitelist add` Discord command in
+      #, which would silently break the `/whitelist add` Discord command in
       # phase 5, and lose anyone invited between deploys. So this seeds the file
       # once and RCON owns it thereafter.
       WHITELIST: "${MC_WHITELIST:-}"
@@ -134,7 +134,7 @@ services:
     profiles: ["bot"]
     # service_started, not service_healthy. `compose up -d` blocks on a
     # service_healthy dependency, and mc's healthcheck has a 5 minute start
-    # period while it downloads the pack — which would stall every deploy behind
+    # period while it downloads the pack, which would stall every deploy behind
     # it and fail the run outright on a cold first boot. wly retries RCON anyway,
     # so it does not need mc to be ready, only to exist.
     depends_on:
@@ -160,7 +160,7 @@ services:
       # business writing into the server's data directory.
       - mc-data:/mc:ro
       # Lifecycle control. wly speaks the Docker Engine API over this socket
-      # directly — the image is distroless and has no docker CLI to shell out to.
+      # directly, the image is distroless and has no docker CLI to shell out to.
       - /var/run/docker.sock:/var/run/docker.sock
 
     mem_limit: 512m

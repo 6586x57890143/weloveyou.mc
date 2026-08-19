@@ -1,4 +1,4 @@
-# wly — the server-side daemon. The Minecraft container is itzg's published
+# wly, the server-side daemon. The Minecraft container is itzg's published
 # image and is never built here.
 #
 # Build from the repository root:
