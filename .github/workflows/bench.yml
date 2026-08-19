@@ -58,8 +58,16 @@ on:
     # rare enough that the box is mostly available for playing on.
     - cron: "0 4 * * 1"
 
+# The sweep opens a PR with the numbers, which needs to push a branch and create
+# the PR. `contents: read` was enough while the sweep had never run; the first
+# real run died with "Permission to ... denied to github-actions[bot]" 403 after
+# the measurement was already done, throwing the result away.
+#
+# Still the minimum: no packages, no id-token, and a human merges. The sweep
+# proposes; it does not decide what the server runs on.
 permissions:
-  contents: read
+  contents: write
+  pull-requests: write
 
 concurrency:
   group: bench

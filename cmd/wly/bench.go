@@ -106,6 +106,18 @@ func benchCmd(args []string, out io.Writer) error {
 		return fmt.Errorf("writing %s: %w", *outPath, err)
 	}
 	fmt.Fprintf(out, "\nwrote %s\n", filepath.Base(*outPath))
+
+	// A sweep where every run failed still writes a report, and used to exit 0
+	// with it — so the workflow went green having measured nothing. Twelve
+	// hours of that is worse than a red build, because an empty file looks like
+	// a result and gets committed as one.
+	measured := 0
+	for _, r := range results {
+		measured += len(r.Runs)
+	}
+	if measured == 0 {
+		return fmt.Errorf("no run produced a measurement; see the failures above")
+	}
 	return nil
 }
 
