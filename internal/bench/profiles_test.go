@@ -212,3 +212,32 @@ func equalFlags(a, b []string) bool {
 	}
 	return true
 }
+
+func TestHeapDefaultsToWhatProductionRuns(t *testing.T) {
+	// A profile that says nothing about memory must measure what actually
+	// ships, not some harness-specific default that quietly differs.
+	cfg, err := Parse([]byte(`
+[profiles.silent]
+image = "itzg/minecraft-server:java25"
+
+[profiles.explicit]
+image  = "itzg/minecraft-server:java25"
+memory = "10G"
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Profile{}
+	for _, p := range cfg.Profiles {
+		byName[p.Name] = p
+	}
+	if got := byName["silent"].Heap(); got != DefaultHeap {
+		t.Errorf("Heap() with no memory set = %q, want %q", got, DefaultHeap)
+	}
+	if got := byName["explicit"].Heap(); got != "10G" {
+		t.Errorf("Heap() = %q, want the profile's own 10G", got)
+	}
+	if DefaultHeap != "6G" {
+		t.Errorf("DefaultHeap = %q; deploy/docker-compose.yml uses 6G", DefaultHeap)
+	}
+}

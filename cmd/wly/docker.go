@@ -36,8 +36,9 @@ func (dockerCLI) Exec(name string, args ...string) error {
 	return exec.Command("docker", append([]string{"exec", name}, args...)...).Run()
 }
 
-func (dockerCLI) MemUsage(name string) (string, error) {
-	out, err := exec.Command("docker", "stats", "--no-stream", "--format", "{{.MemUsage}}", name).Output()
+func (dockerCLI) Stats(name string) (string, error) {
+	out, err := exec.Command("docker", "stats", "--no-stream",
+		"--format", "{{.CPUPerc}}	{{.MemUsage}}", name).Output()
 	return strings.TrimSpace(string(out)), err
 }
 

@@ -38,27 +38,45 @@ java25plus = [
 # ---------------------------------------------------------------------------
 # Instruments
 # ---------------------------------------------------------------------------
-# NOT spark. It is the obvious choice and it does not work here:
+# spark, after all — the earlier exclusion here was wrong about the cause.
 #
-#   - spark 1.10.178 (current) declares minecraft ">=26.1" and will not load
-#     on 1.21.1 at all.
-#   - spark 1.10.109 is the newest 1.21.1 build, from September 2024, and its
-#     bundled async-profiler segfaults the JVM on Java 25 / aarch64:
-#     SIGSEGV at pc=0x0 in VMThread::nativeThreadId. Ten restart loops.
+# What was recorded: spark's bundled async-profiler segfaults the JVM on
+# Java 25 / aarch64 (SIGSEGV at pc=0x0 in VMThread::nativeThreadId, ten restart
+# loops). That crash was real. The conclusion drawn from it was not.
 #
-# So the instruments are ones that ship with the JDK and the pack instead, which
-# is better anyway — nothing to keep ported, and no mod that can crash the thing
-# it measures:
+# spark runs a BACKGROUND profiler on servers by default, and that is what
+# engages async-profiler at boot. `-Dspark.backgroundProfiler=false` stops it,
+# and tick timing is unaffected because it comes from spark's own tick hook and
+# never touches the native agent. Verified on the bench box itself, aarch64,
+# Java 25: Done (1.670s), 45 mods, no segfault.
+#
+# 1.10.109 (2024-09-26) really is the newest build declaring 1.21.1 — Modrinth
+# lists two and spark has moved on to >=26.1 — so this is pinned and will not
+# move until the pack does.
+#
+# spark answers `/spark tps` on a worker thread rather than to the caller, so
+# RCON returns nothing and the numbers land in the server log, which the harness
+# already reads. What that buys:
+#
+#   TPS              20 is the ceiling; below it the server is failing to keep up
+#   MSPT med and p95 tick duration. A tick is 50ms, so a p95 above that is a
+#                    server routinely behind — the thing a player actually feels,
+#                    and invisible in chunks/sec alone
+#
+# So the instruments are now:
 #
 #   throughput   Chunky prints chunks/sec to the server log during pregeneration
+#   tick health  spark, background profiler off
 #   GC pauses    -Xlog:gc, parsed from the container log. Chosen over JFR after
 #                writing the driver: the pause distribution is the only thing
 #                the sweep needs from the collector, and a log line needs no
 #                recording lifecycle, no dump step and no jfr tool in the image.
-#   memory       docker stats for peak RSS
-#   ticks        the server's own tick timing in the log
+#   memory, cpu  docker stats, one call carrying both
 #
-# ponytail: JFR over spark, revisit if a 1.21.1-compatible spark appears
+# ponytail: async-profiler 2.9 is what spark 1.10.109 bundles and it is from
+# 2022. Current spark ships 4.5, whose aarch64 native exports every JNI symbol
+# 2.9 did, so swapping just that file into the jar would likely restore flame
+# graphs on this hardware. Not done, because tick timing does not need it.
 
 # ---------------------------------------------------------------------------
 # How the sweep is run
@@ -216,6 +234,44 @@ Minecraft numbers for it. This is the row worth running first.
 """
 image = "itzg/minecraft-server:java25"
 aikar = true
+flagsets = ["coh"]
+
+# ---------------------------------------------------------------------------
+# Heap size, as its own dimension
+# ---------------------------------------------------------------------------
+# The question is not whether Minecraft CAN use the whole box. It is where more
+# memory stops buying throughput. If 6G and 10G land inside the noise floor then
+# the difference is decorative RAM, and it belongs to the page cache and the OS
+# instead — on a box with 12GB total and no swap, that is not a small decision.
+#
+# Run against the profile that ships today, so the answer is actionable now and
+# does not wait on the collector shootout. `memory` defaults to 6G, which is what
+# deploy/docker-compose.yml sets, so every other profile keeps measuring what
+# production actually runs.
+
+[profiles.j25-g1-coh-4g]
+description = "Compact headers on a heap smaller than production's. Where does it start hurting?"
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "4G"
+flagsets = ["coh"]
+
+[profiles.j25-g1-coh-8g]
+description = "Two gigabytes more than production. Does throughput notice?"
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "8G"
+flagsets = ["coh"]
+
+[profiles.j25-g1-coh-10g]
+description = """
+Ten of the box's twelve gigabytes, leaving two for the OS, Docker and page
+cache. Also the closest thing the matrix has to a deliberate stress case: if
+memory pressure ever destabilises this box, this is the row that will show it.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = true
+memory = "10G"
 flagsets = ["coh"]
 
 [profiles.j25-g1-bruce-coh]

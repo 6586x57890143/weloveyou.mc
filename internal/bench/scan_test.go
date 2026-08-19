@@ -101,12 +101,29 @@ func TestScannerWithoutGenerationHasNoElapsed(t *testing.T) {
 }
 
 func TestObserveKeepsThePeak(t *testing.T) {
+	// Both high-water marks move independently: the run that used the most
+	// memory is not necessarily the moment that used the most CPU.
 	s := NewScanner(nil)
-	for _, v := range []float64{1e9, 3e9, 2e9} {
-		s.Observe(v)
+	for _, v := range [][2]float64{{1e9, 40}, {3e9, 190}, {2e9, 55}} {
+		s.Observe(v[0], v[1])
 	}
-	if got := s.Run().PeakRSS; got != 3e9 {
-		t.Errorf("PeakRSS = %v, want the high-water mark 3e9", got)
+	run := s.Run()
+	if run.PeakRSS != 3e9 {
+		t.Errorf("PeakRSS = %v, want the high-water mark 3e9", run.PeakRSS)
+	}
+	if run.PeakCPU != 190 {
+		t.Errorf("PeakCPU = %v, want the high-water mark 190", run.PeakCPU)
+	}
+}
+
+func TestObserveIgnoresASampleThatDidNotParse(t *testing.T) {
+	// A failed docker stats read arrives as zero, and zero must not clobber a
+	// peak already seen.
+	s := NewScanner(nil)
+	s.Observe(3e9, 190)
+	s.Observe(0, 0)
+	if run := s.Run(); run.PeakRSS != 3e9 || run.PeakCPU != 190 {
+		t.Errorf("a zero sample lowered the peaks: %+v", run)
 	}
 }
 
@@ -198,5 +215,84 @@ func TestParseLoadedModsRejectsAnUnparseableCount(t *testing.T) {
 	// mangled count would be worse than no count at all.
 	if got, ok := ParseLoadedMods("Loading 99999999999999999999 mods"); ok {
 		t.Errorf("ParseLoadedMods overflowed to %d instead of declining", got)
+	}
+}
+
+func TestParseSparkTicks(t *testing.T) {
+	// spark's real reply, as it appears in the server log.
+	const line = "[15:42:58] [spark-worker-pool-1-thread-3/INFO]: [⚡]  0.2/0.2/0.3/0.4;  1.1/2.2/9.9/44.6"
+	med, p95, ok := ParseSparkTicks(line)
+	if !ok {
+		t.Fatalf("ParseSparkTicks did not match %q", line)
+	}
+	// The 1-minute window, not the 10-second one: steadier over a pregeneration
+	// that runs for minutes.
+	if med != 2.2 || p95 != 9.9 {
+		t.Errorf("got median %v p95 %v, want 2.2 and 9.9 from the 1m group", med, p95)
+	}
+	if _, _, ok := ParseSparkTicks("no tick durations here"); ok {
+		t.Error("matched a line with no tick durations")
+	}
+}
+
+func TestParseSparkTPS(t *testing.T) {
+	tests := []struct {
+		name, in string
+		want     float64
+		ok       bool
+	}{
+		{"healthy", "[⚡]  20.0, 20.0, *20.0, *20.0, *20.0", 20.0, true},
+		{"struggling", "[⚡]  14.2, 15.0, 16.5, 18.0, 19.1", 16.5, true},
+		// Five numbers that are not a tick rate: 20 is the ceiling, so anything
+		// above it is some other line that happened to have the same shape.
+		{"not a tps line", "[⚡]  512, 128, 6144, 40, 12", 0, false},
+		{"unrelated", "Done (1.2s)!", 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := ParseSparkTPS(tt.in)
+			if got != tt.want || ok != tt.ok {
+				t.Errorf("ParseSparkTPS(%q) = (%v, %v), want (%v, %v)", tt.in, got, ok, tt.want, tt.ok)
+			}
+		})
+	}
+}
+
+func TestScannerRecordsTickHealth(t *testing.T) {
+	s := NewScanner(nil)
+	s.Feed("[⚡]  0.2/0.2/0.3/0.4;  1.1/2.2/9.9/44.6")
+	s.Feed("[⚡]  20.0, 20.0, *19.4, *20.0, *20.0")
+	run := s.Run()
+	if run.MSPTMed != 2.2 || run.MSPTP95 != 9.9 {
+		t.Errorf("tick durations not recorded: %+v", run)
+	}
+	if run.TPS != 19.4 {
+		t.Errorf("TPS = %v, want the 1m figure 19.4", run.TPS)
+	}
+}
+
+func TestResultTickAccessors(t *testing.T) {
+	res := Result{Runs: []Run{
+		{MSPTMed: 2.0, MSPTP95: 8.0, TPS: 20},
+		{MSPTMed: 4.0, MSPTP95: 12.0, TPS: 18},
+	}}
+	if got := res.MSPTMed(); got != 3.0 {
+		t.Errorf("MSPTMed() = %v, want the median of repeats 3.0", got)
+	}
+	if got := res.MSPTP95(); got != 10.0 {
+		t.Errorf("MSPTP95() = %v, want 10.0", got)
+	}
+	if got := res.TPS(); got != 19.0 {
+		t.Errorf("TPS() = %v, want 19.0", got)
+	}
+}
+
+func TestParseSparkTicksRejectsAnUnparseableNumber(t *testing.T) {
+	// The regex guarantees digits, not that they fit in a float64. A mangled
+	// MSPT would be worse than none, because it still renders as a plausible ms.
+	huge := strings.Repeat("9", 400)
+	line := "[⚡]  0.2/0.2/0.3/0.4;  1.1/" + huge + "/9.9/44.6"
+	if med, p95, ok := ParseSparkTicks(line); ok {
+		t.Errorf("ParseSparkTicks overflowed to (%v, %v) instead of declining", med, p95)
 	}
 }

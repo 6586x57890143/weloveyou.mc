@@ -78,7 +78,7 @@ func benchCmd(args []string, out io.Writer) error {
 		fmt.Fprintln(out)
 
 		for _, w := range workloads {
-			res := bench.Result{Profile: p.Name, Workload: w, Dropped: dropped}
+			res := bench.Result{Profile: p.Name, Heap: p.Heap(), Workload: w, Dropped: dropped}
 			if *dry {
 				results = append(results, res)
 				continue
