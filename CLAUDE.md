@@ -137,6 +137,15 @@ Discord message. Credits run out quietly otherwise, and the first sign would be
 a stopped server. The file exists before the bot does precisely so the bot has
 nothing to invent when it lands.
 
+Until the bot exists, the box pushes the same numbers to the phone itself:
+`wly-cost.service` runs `cost-report.sh` as `ubuntu` and then
+`/opt/wly/bin/cost-push.sh` as `agent`, which renders the JSON to ntfy. It is
+deterministic — no LLM for three numbers — and escalates to high priority on a
+missing or null report, a report older than 36h, a day above 2x the month's
+running average, or a month-end projection above the budget (`WLY_COST_BUDGET`,
+default 5). A null amount is pushed as *unknown*, never as zero. The report now
+carries the API's own `currency` field, so nothing downstream has to assume EUR.
+
 Stop the bench box when it is not sweeping. Stopped instances bill only for the
 boot volume, so an idle bench box is pennies and a running one is not.
 

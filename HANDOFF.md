@@ -138,6 +138,12 @@ service sits behind a `bot` compose profile and does not start.
 `/var/lib/wly/cost.json`. Credits drain quietly and the first symptom would be
 a stopped server.
 
+That requirement is met on the phone but not yet in Discord. `wly-cost.service`
+now has a second step, `/opt/wly/bin/cost-push.sh`, which renders the report to
+ntfy daily at 06:30 UTC and shouts when it is missing, null, stale, spiking, or
+projecting past the budget. When the bot lands it should read the same file and
+say the same thing in the channel; the thresholds are in that script, not in Go.
+
 ## The plan
 
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md` is the source of
