@@ -19,9 +19,14 @@ on:
         required: true
         default: both
         type: choice
-        # A = vanilla worldgen (control). B = the same run against the real
-        # pack. A flag that wins on A and loses on B is a finding, not noise.
-        options: [a, b, both]
+        # Workload A = vanilla worldgen (control). Workload B = the same run
+        # against the real pack. A flag that wins on A and loses on B is a
+        # finding, not noise.
+        #
+        # These must be the strings ParseWorkloads accepts, not the A/B labels:
+        # the options used to read [a, b, both], so picking anything but the
+        # default failed the sweep on the first command with "unknown workload".
+        options: [both, vanilla, pack]
       runs:
         description: "Repeats per profile — medians are reported, not single runs"
         required: false
