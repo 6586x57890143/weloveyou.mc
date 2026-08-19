@@ -112,7 +112,7 @@ func benchCmd(args []string, out io.Writer) error {
 // dockerProbe asks a JVM whether it accepts a flag. This is the whole mechanism
 // that keeps the profile file honest across JDK bumps.
 func dockerProbe(image string, flags []string) error {
-	args := append([]string{"run", "--rm", "--entrypoint", "java", image}, bench.ProbeArgs(flags[0])...)
+	args := append([]string{"run", "--rm", "--entrypoint", "java", image}, bench.ProbeArgs(flags)...)
 	cmd := exec.Command("docker", args...)
 	outp, err := cmd.CombinedOutput()
 	if err != nil {

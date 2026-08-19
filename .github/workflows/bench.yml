@@ -26,6 +26,28 @@ on:
         description: "Repeats per profile — medians are reported, not single runs"
         required: false
         default: "3"
+      # The sweep is two passes. 18 profiles at full radius and 3 repeats is
+      # roughly 50 hours of a box that bills by the hour, so pass 1 screens the
+      # whole matrix cheaply and pass 2 confirms only what looked good:
+      #
+      #   screening     runs=1 radius=500  out=BENCHMARKS-screening.md
+      #   confirmation  runs=3 radius=1000 only=<winner>  out=BENCHMARKS.md
+      #
+      # These are inputs rather than an edit to this file because the two passes
+      # differ only in their arguments, and a workflow edit per pass would be a
+      # commit that says nothing.
+      radius:
+        description: "Chunky pregen radius — 500 to screen, 1000 to confirm"
+        required: false
+        default: "1000"
+      only:
+        description: "Run a single profile by name (blank = all enabled)"
+        required: false
+        default: ""
+      out:
+        description: "Output file — use BENCHMARKS-screening.md for a screening pass"
+        required: false
+        default: BENCHMARKS.md
   schedule:
     # Weekly. Frequent enough to catch a JDK or mod bump moving the numbers,
     # rare enough that the box is mostly available for playing on.
@@ -51,29 +73,38 @@ jobs:
           cache: true
 
       - name: run the sweep
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
           go run ./cmd/wly bench \
             --workload "${{ github.event.inputs.workload || 'both' }}" \
             --runs "${{ github.event.inputs.runs || '3' }}" \
-            --out BENCHMARKS.md
+            --radius "${{ github.event.inputs.radius || '1000' }}" \
+            --only "${{ github.event.inputs.only || '' }}" \
+            --out "$OUT"
 
       # A human merges. The sweep proposes; it does not decide what the server
       # runs on.
       - name: open a PR when the numbers moved
         env:
           GH_TOKEN: ${{ github.token }}
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- BENCHMARKS.md; then
+          # --porcelain, not `git diff`: a screening pass writes a file that is
+          # not tracked yet, and `git diff` cannot see an untracked file, so the
+          # first screening run would silently propose nothing.
+          if [ -z "$(git status --porcelain -- "$OUT")" ]; then
             echo "no change in the numbers; nothing to propose"
             exit 0
           fi
           branch="bench/$(date -u +%Y%m%d-%H%M)"
           git switch -c "$branch"
-          git -c user.name=bench -c user.email=bench@local commit -am "bench: refresh BENCHMARKS.md"
+          git add -- "$OUT"
+          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
           git push origin "$branch"
           gh pr create --fill --title "bench: JVM sweep $(date -u +%Y-%m-%d)" \
-            --body "Automated sweep. Review the medians before merging; anything under ~5% is noise."
+            --body "Automated sweep into \`$OUT\`. Review the medians before merging; anything under ~5% is noise. A screening pass (runs=1) has no variance to report and must not be compared against confirmed numbers."
 
       # Always, including on failure: a crashed sweep that leaves the box running
       # costs more than the sweep did. An in-guest poweroff transitions the OCI

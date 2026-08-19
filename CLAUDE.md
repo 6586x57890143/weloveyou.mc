@@ -251,8 +251,38 @@ Two rules that are easy to get wrong:
    Trading slight instability for a measured gain is fine when the mitigation is a documented
    flag; shipping an unmeasured profile because it sounds fast is not.
 
+4. **The pack is a skeleton and will grow.** Today's `pack/stable` is Terralith, Oritech and
+   perf mods; gameplay mods are still to come. A workload-B number is only comparable to
+   another taken against a similar pack, so the report prints the mod count it measured and
+   says so. Do not compare a row from today against one taken after the pack doubles.
+5. **The sweep is two passes.** 18 profiles at full radius and 3 repeats is roughly 50 hours
+   of a box that bills by the hour. Screen the whole matrix at `--runs 1 --radius 500` into
+   `BENCHMARKS-screening.md`, then confirm the top few at full depth into `BENCHMARKS.md`.
+   A screening run has no variance to report, so the two files are never comparable.
+
 `jvm-profiles.toml` holds the candidates. Nothing in it is believed until it has a row in
 `BENCHMARKS.md`.
 
 `wly bench` preflights every flag with `java <flags> -version` and drops what the JVM
-rejects, so a flag removed by a future JDK degrades instead of failing the boot.
+rejects, so a flag removed by a future JDK degrades instead of failing the boot. It probes
+the whole set first and only falls back to one-at-a-time when the set is refused — which
+both costs one JVM start instead of thirty and keeps flags that are legal only in company
+(`-XX:NodeLimitFudgeFactor` must be 2-40% of `-XX:MaxNodeLimit`, so raising the limit alone
+is rejected while the pair is fine).
+
+**The preflight cannot catch a flag the JVM accepts and then ignores**, and that is a real
+category, not a hypothetical:
+
+- `{C2 product}` flags are inert on GraalVM, where `UseJVMCICompiler=true` means Graal
+  replaces C2. This is why `jvm-profiles.toml` splits `bruce-c2` into its own flagset.
+- x86-only flags (`-XX:+UseVectorCmov`, `-XX:+UseFastUnorderedTimeStamps`) do nothing on the
+  aarch64 bench box.
+- `-XX:InitiatingHeapOccupancyPercent` is only a starting value while `G1UseAdaptiveIHOP`
+  defaults to true.
+- Contrary to the plan's guess, `-XX:NmethodSweepActivity` is **not** in this category — it
+  is still a live `{product}` flag on JDK 25, accepted without warning.
+
+One combination is impossible rather than merely inert: **Graal does not support Shenandoah**
+(`GraalError: Shenandoah garbage collector is not supported by Graal`). HotSpot accepts the
+flag and then the JIT disables itself, so a run that survived it would be measuring GraalVM
+with no Graal. That profile is declared and disabled.
