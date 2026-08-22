@@ -61,6 +61,10 @@ CAVEATS = [
     "<strong>Peak CPU is relative to one core</strong>, so 200% means both cores were "
     "saturated. A profile well under that left parallelism unused, often the "
     "explanation for a throughput number that looks disappointing.",
+    "<strong>Core count is part of the result, not a footnote.</strong> These run on "
+    "two cores. Mods that parallelise the tick loop can be a clear win on a "
+    "twelve-thread desktop and deadlock here, which is not a tuning difference, it "
+    "is a different machine.",
     "<strong>MSPT is the number players feel.</strong> A tick is 50ms; a 95th "
     "percentile above that means the server is routinely behind, however good its "
     "chunk throughput looks. Measured with spark, whose background profiler is "
@@ -79,6 +83,34 @@ def cell_delta(text):
     if t.startswith("-"):
         return f'<td class="lose">{t}</td>'
     return f"<td>{t}</td>"
+
+
+def hardware_meta(workloads):
+    """Name the machine, and say plainly when a table mixes more than one.
+
+    A sharded sweep runs on several boxes and they are not automatically the
+    same: two provisioned on one afternoon came up AmpereOne with four threads
+    instead of Neoverse-N1 with two. Numbers from both in one table look like a
+    flag winning when they are really two different machines.
+    """
+    seen = []
+    for wl in workloads.values():
+        for row in wl.get("rows") or []:
+            hw = row.get("hardware") or {}
+            if not hw.get("cpus") and not hw.get("model"):
+                continue
+            key = (hw.get("model"), hw.get("cpus"), hw.get("threads_per_core"))
+            if key not in seen:
+                seen.append(key)
+    if not seen:
+        return ""
+    if len(seen) == 1:
+        model, cpus, tpc = seen[0]
+        smt = f" ({tpc} threads/core)" if (tpc or 1) > 1 else ""
+        return f"<span>{html.escape(str(model or '?'))}, {cpus} vCPU{smt}</span>"
+    names = ", ".join(f"{html.escape(str(m or '?'))} ({c} vCPU)" for m, c, _ in seen)
+    return (f'<span class="lose">mixed hardware, not directly comparable: '
+            f'{names}</span>')
 
 
 def cell_mspt(ms):
@@ -136,7 +168,8 @@ def render(doc):
             f"<span>host <code>{html.escape(doc.get('host', '?'))}</code></span>"
             f"<span>generated {html.escape(doc.get('generated', '?'))}</span>"
             f"<span>{doc.get('repeats_per_profile', 0)} run(s) per profile</span>"
-            "</div>"
+            + hardware_meta(workloads)
+            + "</div>"
         )
     else:
         # An honest empty state beats a broken build. The page exists from the

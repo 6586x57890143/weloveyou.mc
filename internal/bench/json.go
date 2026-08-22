@@ -36,6 +36,7 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 			wl.Rows = append(wl.Rows, jsonRow{
 				Profile:      r.Profile,
 				Heap:         r.Heap,
+				Hardware:     r.Hardware,
 				ChunksPerSec: cps,
 				PeakCPUPct:   r.PeakCPU(),
 				GCPauseP95Ms: r.GCPause(95),
@@ -72,6 +73,7 @@ type jsonWorkload struct {
 type jsonRow struct {
 	Profile      string   `json:"profile"`
 	Heap         string   `json:"heap,omitempty"`
+	Hardware     Hardware `json:"hardware"`
 	PeakCPUPct   float64  `json:"peak_cpu_percent"`
 	GCPauseP95Ms float64  `json:"gc_pause_p95_ms"`
 	MSPTMedianMs float64  `json:"mspt_median_ms"`
