@@ -45,18 +45,25 @@ EMPTY = "-"
 # up at one width is worse than one that never pretended to.
 CSS = """
 :root{
- --bg:#0C0E10; --panel:#121519; --rule:#232A31; --rule-hi:#33404B;
- --fg:#C3CBD4; --fg-hi:#E8EEF4; --dim:#6E7A87;
- --win:#62E063; --lose:#F0554F; --base:#E8A33D; --info:#57D9D9;
+ --bg:#211F1B; --panel:#282621; --rule:#3B372F; --rule-hi:#564E42;
+ --fg:#D5CEC1; --fg-hi:#EFE9DC; --dim:#8E8677;
+ --win:#8FA860; --lose:#C4705C; --base:#D8A657; --info:#84A69C;
  --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
 }
 *{box-sizing:border-box}
 html{background:var(--bg)}
-body{margin:0;padding:3rem 1.25rem 5rem;background:var(--bg);color:var(--fg);
- font:13px/1.55 var(--mono);font-variant-numeric:tabular-nums;
+body{margin:0;padding:2.5rem 1.5rem 4rem;background:var(--bg);color:var(--fg);
+ font:15px/1.6 var(--mono);font-variant-numeric:tabular-nums;
  -webkit-font-smoothing:antialiased}
-main{max-width:68rem;margin:0 auto}
-.prose{max-width:44rem}
+main{max-width:76rem;margin:0 auto}
+/* Two columns across the top: what this is on the left, what it found on the
+   right. Keeps line length readable without leaving half the width empty. */
+.head{display:flex;gap:2.5rem 3rem;align-items:flex-start;margin:1.5rem 0 0}
+.head>.left{flex:0 1 42%;min-width:26ch}
+.head>.right{flex:1 1 55%;min-width:0}
+/* Notes sit side by side above their table, so they fill the same width. */
+.notes{display:flex;flex-wrap:wrap;gap:1.5rem 2.5rem;margin:.75rem 0 1.25rem}
+.notes>.note{flex:1 1 30ch;margin:0;max-width:none}
 a{color:var(--info);text-decoration:none;border-bottom:1px solid transparent}
 a:hover{border-bottom-color:var(--info)}
 code{font-family:var(--mono)}
@@ -65,62 +72,71 @@ code{font-family:var(--mono)}
    repeated dash clipped by overflow, so it fits any width exactly. */
 .hrule{display:flex;color:var(--rule-hi);user-select:none;line-height:1}
 .hrule i{flex:1 1 auto;overflow:hidden;white-space:nowrap;font-style:normal}
-.bar-row{display:flex;align-items:baseline;gap:1ch;color:var(--rule-hi);line-height:1.9}
-.bar-row .edge{user-select:none}
-.bar-row .t{flex:1 1 auto;color:var(--fg-hi);letter-spacing:.16em;font-weight:600}
+.bar-row{display:flex;align-items:baseline;gap:1ch;padding-bottom:.5rem}
+.bar-row .t{flex:1 1 auto;color:var(--fg-hi);letter-spacing:.12em;font-weight:600;font-size:17px}
 .bar-row .d{color:var(--dim);letter-spacing:.04em}
 
-h2{font-size:13px;font-weight:600;margin:3.5rem 0 .25rem;color:var(--fg-hi);
- letter-spacing:.14em;text-transform:uppercase}
-.sub{color:var(--dim);margin:.9rem 0 0}
-.census{color:var(--dim);margin:.75rem 0 0;letter-spacing:.02em}
+h2{font-size:15px;font-weight:600;margin:3rem 0 .5rem;color:var(--fg-hi);
+ letter-spacing:.1em;text-transform:uppercase}
+.sub{color:var(--dim);margin:0}
+.census{color:var(--dim);margin:1.25rem 0 0;letter-spacing:.02em}
 .census b{color:var(--fg-hi);font-weight:600}
-.note{color:var(--dim);margin:.3rem 0 .9rem;max-width:52rem;white-space:normal}
+.note{color:var(--dim);margin:.5rem 0 1rem;max-width:none;white-space:normal}
 .note strong{color:var(--fg);font-weight:600}
 
 /* Dotted leader lines. */
-.leads{margin:1.75rem 0 2.5rem}
+.leads{margin:0}
 .lead{display:flex;align-items:baseline;gap:.75ch}
-.lead .k{white-space:nowrap;color:var(--dim);letter-spacing:.08em}
+.lead .k{white-space:nowrap;color:var(--dim);letter-spacing:.06em}
 .lead .d{flex:1 1 auto;min-width:2ch;overflow:hidden;white-space:nowrap;color:var(--rule)}
 .lead .v{white-space:nowrap;color:var(--fg-hi)}
 .lead .v .q{color:var(--dim)}
 
 .wrap{overflow-x:auto;border:1px solid var(--rule);background:var(--panel)}
-table{border-collapse:collapse;width:100%;white-space:nowrap}
-th,td{padding:.34rem .7rem;text-align:right;border-bottom:1px solid var(--rule)}
+table{border-collapse:collapse;width:100%;white-space:nowrap;font-size:14px}
+th,td{padding:.5rem .75rem;text-align:right;border-bottom:1px solid var(--rule)}
 th:nth-child(3),td:nth-child(3){text-align:left}
-thead th{color:var(--dim);font-weight:400;letter-spacing:.1em;font-size:11px;
- text-transform:uppercase;background:var(--bg)}
+thead th{color:var(--dim);font-weight:500;letter-spacing:.08em;font-size:12px;
+ text-transform:uppercase;background:var(--bg);padding-top:.75rem;padding-bottom:.75rem}
 tbody tr:last-child td{border-bottom:0}
-tbody tr:hover td{background:#171C21}
+tbody tr:hover td{background:#2E2B25}
 td.rank{color:var(--rule-hi);padding-right:.2rem}
+tr.is-failed td.rank{color:var(--lose)}
 td.name{color:var(--fg-hi)}
-tr.is-base td{background:#16161A}
+tr.is-base td{background:#2B2822}
 tr.is-base td.name,tr.is-base td.rank,td.mark{color:var(--base)}
 td.mark{padding:0 0 0 .35rem;width:1ch}
-td.bar{color:var(--rule-hi);letter-spacing:-.08em;padding-left:.15rem;text-align:left}
+td.bar{color:var(--rule-hi);letter-spacing:.12em;padding-left:.15rem;text-align:left;opacity:.85}
 td.bar.win{color:var(--win)}
 td.bar.lose{color:var(--lose)}
 .win{color:var(--win)}
 .lose{color:var(--lose)}
-.dim{color:var(--dim)}
+.dim{color:#A29788}
 td.failed{color:var(--lose);letter-spacing:.14em;text-align:left}
 
-.banner{border:1px solid var(--rule);border-left:2px solid var(--base);
- background:var(--panel);padding:.75rem 1rem;margin:3.5rem 0 0;color:var(--dim);
- max-width:52rem;white-space:normal}
-.banner b{color:var(--base);font-weight:600;letter-spacing:.12em}
+.banner{border:1px solid var(--rule);border-left:3px solid var(--base);
+ background:var(--panel);padding:1rem 1.25rem;margin:3rem 0 .5rem;color:var(--dim);
+ white-space:normal;font-size:14px;line-height:1.65;margin-top:2.5rem}
+.banner+h2{margin-top:1.75rem}
+.banner b{color:var(--base);font-weight:600;letter-spacing:.1em;font-size:13px}
 .banner strong{color:var(--fg)}
 .caveats{border:1px solid var(--rule);background:var(--panel);
- padding:1.1rem 1.3rem;margin:3.5rem 0 0;max-width:52rem}
-.caveats h3{margin:0 0 .7rem;font-size:11px;color:var(--dim);font-weight:400;
- letter-spacing:.14em;text-transform:uppercase}
-.caveats ul{margin:0;padding-left:1.1rem}
-.caveats li{margin:.45rem 0;color:var(--dim)}
+ padding:1.2rem 1.4rem;margin:3.5rem 0 0}
+.caveats h3{margin:0 0 1rem;font-size:12px;color:var(--dim);font-weight:500;
+ letter-spacing:.1em;text-transform:uppercase}
+.caveats ul{margin:0;padding-left:1.1rem;columns:2;column-gap:2.5rem}
+.caveats li{break-inside:avoid}
+.caveats li{margin:0 0 1rem;color:var(--dim);font-size:14px;line-height:1.65}
 .caveats strong{color:var(--fg)}
-footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--rule);color:var(--dim)}
-@media(max-width:640px){body{padding:1.5rem .75rem 3rem}th,td{padding:.3rem .5rem}}
+footer{margin-top:3.5rem;padding-top:1.2rem;border-top:1px solid var(--rule);
+ color:var(--dim);text-align:center}
+@media(max-width:900px){.head{flex-direction:column;gap:1.75rem}}
+@media(max-width:640px){
+ body{padding:1.5rem 1rem 3rem;font-size:14px}
+ table{font-size:13px}th,td{padding:.5rem}
+ .caveats ul{columns:1}
+ .bar-row{flex-wrap:wrap}
+}
 """
 
 CAVEATS = [
@@ -149,8 +165,8 @@ CAVEATS = [
     "<strong>Heap is a dimension, not a constant.</strong> The useful question is not "
     "whether the server can use the whole box, it is where more memory stops buying "
     "throughput.",
-    "<strong>A row marked FAILED produced no run at all.</strong> It is an absence, "
-    "not a score of zero.",
+    "<strong>FAILED means no run finished.</strong> That is a gap in the data, not a "
+    "score of zero.",
 ]
 
 BASELINE = "baseline-j21"
@@ -233,12 +249,10 @@ def lead(key, value):
 def frame(title, right):
     """The header block. Corner glyphs are real; the runs between them scale."""
     return (
-        '<div class="hrule">┌<i>' + "─" * 260 + "</i>┐</div>"
-        '<div class="bar-row"><span class="edge">│</span>'
+        '<div class="bar-row">'
         f'<span class="t">{html.escape(title)}</span>'
-        f'<span class="d">{html.escape(right)}</span>'
-        '<span class="edge">│</span></div>'
-        '<div class="hrule">╞<i>' + "═" * 260 + "</i>╡</div>"
+        f'<span class="d">{html.escape(right)}</span></div>'
+        '<div class="hrule"><i>' + "─" * 300 + "</i></div>"
     )
 
 
@@ -311,33 +325,37 @@ def workload_table(key, wl, parts):
     worldgen = wl.get("worldgen", True)
 
     parts.append(f"<h2>{html.escape(wl.get('title', key))}</h2>")
-    parts.append(
+
+    # Collected and emitted as one row rather than as a stack of short
+    # paragraphs, so they fill the width the table already occupies.
+    notes = [
         f'<p class="note">Read by <strong>{html.escape(metric)}</strong>, '
-        f'{"lower" if lower else "higher"} is better. <code>vs base</code> compares it, '
-        "signed so a positive number is always the better one.</p>"
-    )
+        f'{"lower" if lower else "higher"} is better. <code>vs base</code> flips sign '
+        "to match, so a plus is always good news.</p>"
+    ]
     if worldgen:
         # Measured, not guessed: on the first real sweep every profile reported
         # TPS 20.0 and MSPT p95 between 0.5ms and 0.9ms on workload B. Publishing
         # fifty rows of that without saying so presents noise as a result.
-        parts.append(
-            '<p class="note">MSPT and TPS are <strong>not meaningful here</strong>. '
-            "Pregeneration barely ticks entities, so they sit at idle whatever the flags "
-            "do; the tick workloads are what move them.</p>"
+        notes.append(
+            '<p class="note"><strong>Ignore MSPT and TPS on this table.</strong> '
+            "Pregeneration hardly touches entities, so both sit at idle no matter what "
+            "the flags do. They only move under the tick workloads.</p>"
         )
     if key == "machines":
-        parts.append(
-            '<p class="note">Machines are powered but not fed: this is block entity '
-            "ticking and energy network cost, not production throughput.</p>"
+        notes.append(
+            '<p class="note">The machines have power but nothing to process, so this is '
+            "what it costs to tick them and shove energy around, not what it costs to "
+            "run a factory.</p>"
         )
     if wl.get("mods_loaded"):
         tail = (
             " (Fabric API and the pregenerator).</p>"
             if worldgen and key == "vanilla"
-            else ". Rows are only comparable to runs against a similar pack, and this "
-            "pack grows.</p>"
+            else ". Rows only compare against runs on a pack this size, and it grows.</p>"
         )
-        parts.append(f'<p class="note">{wl["mods_loaded"]} mods loaded' + tail)
+        notes.append(f'<p class="note">{wl["mods_loaded"]} mods loaded' + tail)
+    parts.append('<div class="notes">' + "".join(notes) + "</div>")
 
     rows = list(wl.get("rows") or [])
     live = [r for r in rows if not r.get("failed")]
@@ -351,7 +369,12 @@ def workload_table(key, wl, parts):
         '<div class="wrap"><table><thead><tr>'
         "<th>#</th><th></th><th>profile</th><th>heap</th>"
         f"<th>{html.escape(metric)}</th><th></th><th>vs base</th>"
-        "<th>MSPT p95</th><th>TPS</th><th>RSS</th><th>CPU</th>"
+        # MSPT median beside whichever percentile the workload is read by. On a
+        # tick workload the primary column is already p95, so repeating it here
+        # was one column saying the same thing twice; the median is the half
+        # that says whether a collector stalls routinely or only rarely, and it
+        # was in the JSON but displayed nowhere.
+        "<th>MSPT med</th><th>TPS</th><th>RSS</th><th>CPU</th>"
         "<th>boot</th><th>GC95</th><th>GC99</th>"
         "</tr></thead><tbody>"
     )
@@ -359,7 +382,11 @@ def workload_table(key, wl, parts):
         is_base = row.get("profile") == BASELINE
         failed = bool(row.get("failed"))
         head = (
-            ('<tr class="is-base">' if is_base else "<tr>")
+(
+                '<tr class="is-base">'
+                if is_base
+                else ('<tr class="is-failed">' if failed else "<tr>")
+            )
             + cell("✕" if failed else f"{i:02d}", "rank")
             + cell("◆" if is_base else "", "mark")
             + cell(f"<code>{html.escape(row.get('profile', '?'))}</code>", "name")
@@ -372,16 +399,21 @@ def workload_table(key, wl, parts):
             continue
 
         value = row.get("primary_value") or 0
-        # Normalise across the observed range so the bars use their full width,
-        # and invert when lower is better, so a longer bar always means better.
-        frac = (value - floor) / (span - floor) if span > floor else 1.0
+        # Proportional to the value, from zero, so the length can be read as the
+        # number itself. Normalising across the observed range instead stretched
+        # a fifth of a difference over the full width, and drew the slowest row
+        # as a one-cell sliver that looked like a rendering fault.
+        if lower:
+            frac = (floor / value) if value else 0.0
+        else:
+            frac = (value / span) if span else 0.0
         cls = delta_class(row.get("vs_baseline"))
         parts.append(
             head
             + cell(f"{value:.1f}")
-            + cell(bar(1.0 - frac if lower else frac), f"bar {cls}")
+            + cell(bar(frac), f"bar {cls}")
             + cell(html.escape(row.get("vs_baseline") or EMPTY), cls)
-            + cell(num(row.get("mspt_p95_ms"), ".1f", "ms"))
+            + cell(num(row.get("mspt_median_ms"), ".1f", "ms"))
             + cell(num(row.get("tps"), ".1f"))
             + cell(human_bytes(row.get("peak_rss_bytes")))
             + cell(num(row.get("peak_cpu_percent"), ".0f", "%"))
@@ -431,39 +463,45 @@ def render(doc, screening=None):
             (primary.get("generated") or "")[:10] or "no data",
         )
     )
-    parts.append(
-        '<p class="sub prose">Which JVM, which collector, which flags. Measured on the '
+    intro = (
+        '<p class="sub">Which JVM, which collector, which flags. Measured on the '
         "little two-core box we actually run, because copying numbers off a "
         "four-year-old guide is how you end up confidently wrong.</p>"
     )
 
     if not (has_confirmed or has_screening):
+        parts.append(f'<div class="head"><div class="left">{intro}</div></div>')
         # An honest empty state beats a broken build. pages.yml also triggers when
         # its own files change, so the first run happens before any sweep merged.
         parts.append(
             '<div class="banner"><b>NO RESULTS YET</b><br>The sweep runs on a two-core '
-            "Ampere A1 that stays powered off unless it is measuring, so numbers turn up "
-            "in batches. Nothing is published until a human has read it and merged it.</div>"
+            "Ampere A1 that sits powered off unless it is measuring, so numbers arrive "
+            "in batches. Nothing goes up until someone has read it and merged it.</div>"
         )
     else:
         n = sum(len(w.get("rows") or []) for w in (primary.get("workloads") or {}).values())
         wn = len(primary.get("workloads") or {})
         reps = primary.get("repeats_per_profile") or 0
-        parts.append(
+        census = (
             '<div class="census">'
             f"<b>{n}</b> rows · <b>{wn}</b> workload{'s' if wn != 1 else ''} · "
             f"<b>{reps}</b> run{'s' if reps != 1 else ''} per profile</div>"
         )
-        summary(primary, parts)
+        right = []
+        summary(primary, right)
+        parts.append(
+            '<div class="head"><div class="left">' + intro + census + "</div>"
+            '<div class="right">' + "".join(right) + "</div></div>"
+        )
 
     if has_confirmed:
         sections(doc, parts)
     if has_screening:
         parts.append(
-            '<div class="banner"><b>SCREENING PASS</b><br>One run per profile, so there '
-            "is no variance to report and a single noisy neighbour moves a row. These "
-            "exist to decide what is worth confirming at depth. They are "
-            "<strong>not comparable to confirmed numbers</strong>.</div>"
+            '<div class="banner"><b>SCREENING PASS</b><br>One run each, so there is no '
+            "variance here and one noisy neighbour is enough to move a row. This pass "
+            "picks what is worth measuring properly. <strong>Do not read it next to "
+            "confirmed numbers.</strong></div>"
         )
         sections(screening, parts)
 
