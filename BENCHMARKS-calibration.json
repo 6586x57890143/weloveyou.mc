@@ -1,0 +1,115 @@
+{
+  "host": "weloveyou-bench-2",
+  "generated": "2026-08-22T16:24:14Z",
+  "repeats_per_profile": 1,
+  "noise_floor": 0.05,
+  "seed": "weloveyou-bench",
+  "radius": 400,
+  "load": 3,
+  "workloads": {
+    "explore": {
+      "title": "Workload C - players exploring",
+      "mods_loaded": 143,
+      "primary_metric": "MSPT p95",
+      "primary_lower_is_better": true,
+      "worldgen": false,
+      "rows": [
+        {
+          "profile": "baseline-j21",
+          "primary_value": 65.2,
+          "heap": "6G",
+          "hardware": {
+            "model": "Neoverse-N1",
+            "arch": "aarch64",
+            "cpus": 2,
+            "threads_per_core": 1,
+            "memory_mb": 11927,
+            "kernel": "6.17.0-1018-oracle"
+          },
+          "peak_cpu_percent": 200.17,
+          "gc_pause_p95_ms": 99.9738,
+          "mspt_median_ms": 43.3,
+          "mspt_p95_ms": 65.2,
+          "tps": 19.97,
+          "chunks_per_sec": 0,
+          "vs_baseline": "~",
+          "peak_rss_bytes": 7153268031.488,
+          "startup_sec": 40.118,
+          "gc_pause_p99_ms": 183.22479999999996,
+          "repeats": 1
+        }
+      ]
+    },
+    "machines": {
+      "title": "Workload E - Oritech machines under power",
+      "mods_loaded": 143,
+      "primary_metric": "MSPT p95",
+      "primary_lower_is_better": true,
+      "worldgen": false,
+      "rows": [
+        {
+          "profile": "baseline-j21",
+          "primary_value": 10.5,
+          "heap": "6G",
+          "hardware": {
+            "model": "Neoverse-N1",
+            "arch": "aarch64",
+            "cpus": 2,
+            "threads_per_core": 1,
+            "memory_mb": 11927,
+            "kernel": "6.17.0-1018-oracle"
+          },
+          "peak_cpu_percent": 45.92,
+          "gc_pause_p95_ms": 99.50090000000012,
+          "mspt_median_ms": 5.7,
+          "mspt_p95_ms": 10.5,
+          "tps": 20,
+          "chunks_per_sec": 0,
+          "vs_baseline": "~",
+          "peak_rss_bytes": 7021197787.136,
+          "startup_sec": 39.736,
+          "gc_pause_p99_ms": 198.99511999999987,
+          "repeats": 1
+        }
+      ]
+    },
+    "village": {
+      "title": "Workload D - villagers and entity AI",
+      "mods_loaded": 143,
+      "primary_metric": "MSPT p95",
+      "primary_lower_is_better": true,
+      "worldgen": false,
+      "rows": [
+        {
+          "profile": "baseline-j21",
+          "primary_value": 17.3,
+          "heap": "6G",
+          "hardware": {
+            "model": "Neoverse-N1",
+            "arch": "aarch64",
+            "cpus": 2,
+            "threads_per_core": 1,
+            "memory_mb": 11927,
+            "kernel": "6.17.0-1018-oracle"
+          },
+          "peak_cpu_percent": 111.14,
+          "gc_pause_p95_ms": 74.8196,
+          "mspt_median_ms": 14.7,
+          "mspt_p95_ms": 17.3,
+          "tps": 20,
+          "chunks_per_sec": 0,
+          "vs_baseline": "~",
+          "peak_rss_bytes": 7060926234.624,
+          "startup_sec": 39.832,
+          "gc_pause_p99_ms": 210.9891999999999,
+          "repeats": 1
+        }
+      ]
+    }
+  },
+  "workload_order": [
+    "explore",
+    "village",
+    "machines"
+  ]
+}
