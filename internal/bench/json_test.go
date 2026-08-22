@@ -96,3 +96,30 @@ func TestMaxRepeatsReportsWhatLandedNotWhatWasAsked(t *testing.T) {
 		t.Errorf("maxRepeats(nil) = %d, want 0", got)
 	}
 }
+
+func TestRenderJSONCarriesTickHealth(t *testing.T) {
+	// The Markdown table had TPS and MSPT while the JSON did not, so the
+	// published site rendered a dash for both no matter what was measured.
+	res := []Result{{Profile: Baseline, Workload: WorkloadPack,
+		Runs: []Run{{Chunks: 100, Elapsed: time.Second, MSPTMed: 2.2, MSPTP95: 9.9, TPS: 19.4}}}}
+	raw, err := RenderJSON(res, "h", time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Workloads map[string]struct {
+			Rows []struct {
+				MSPTMedianMs float64 `json:"mspt_median_ms"`
+				MSPTP95Ms    float64 `json:"mspt_p95_ms"`
+				TPS          float64 `json:"tps"`
+			} `json:"rows"`
+		} `json:"workloads"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	row := doc.Workloads["pack"].Rows[0]
+	if row.TPS != 19.4 || row.MSPTP95Ms != 9.9 || row.MSPTMedianMs != 2.2 {
+		t.Errorf("tick health missing from JSON: %+v", row)
+	}
+}

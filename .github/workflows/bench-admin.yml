@@ -31,6 +31,10 @@ on:
           # the production box and is not version controlled, so this is the
           # only copy of the fix that survives.
           - quiet-timers
+          # Installs a nightly power-off that checks first whether a sweep is
+          # running. The old one lived on the production box and stopped a
+          # healthy sweep seven hours in.
+          - self-stop
 
 permissions:
   contents: read
@@ -163,3 +167,54 @@ jobs:
             systemctl list-timers --no-pager | head -8
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The bench box used to be powered off at 23:30 UTC by a timer on the
+      # production box that called `bench-power.sh stop` unconditionally. On
+      # 2026-08-19 that stopped a healthy sweep seven hours in and nine runs
+      # deep: "The runner has received a shutdown signal". The safety net cost
+      # more than the failure it guarded against.
+      #
+      # The check has to happen here, not on production, because only this box
+      # can see whether a job is running, and production holds no key for it.
+      # Installed through the runner rather than over SSH because the tailnet
+      # auth key is ephemeral, so the box drops off the tailnet on every reboot.
+      - name: install the busy-aware self-stop
+        if: github.event.inputs.action == 'self-stop'
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /opt/wly
+          sudo tee /opt/wly/bench-idle.sh >/dev/null <<'EOF'
+          #!/usr/bin/env bash
+          # Power this box off at night, unless a sweep is running.
+          set -uo pipefail
+          if pgrep -f 'Runner.Worker' >/dev/null 2>&1; then
+            echo "a runner job is active, leaving the box up"; exit 0
+          fi
+          if [ -n "$(docker ps -q --filter 'name=bench-' 2>/dev/null)" ]; then
+            echo "a bench container is still running, leaving the box up"; exit 0
+          fi
+          echo "idle, powering off"
+          sudo poweroff
+          EOF
+          sudo chmod +x /opt/wly/bench-idle.sh
+          sudo tee /etc/systemd/system/wly-bench-selfstop.service >/dev/null <<'EOF'
+          [Unit]
+          Description=Power off the bench box when no sweep is running
+          [Service]
+          Type=oneshot
+          ExecStart=/opt/wly/bench-idle.sh
+          EOF
+          sudo tee /etc/systemd/system/wly-bench-selfstop.timer >/dev/null <<'EOF'
+          [Unit]
+          Description=Nightly idle check for the bench box
+          [Timer]
+          OnCalendar=*-*-* 23:30:00 UTC
+          Persistent=false
+          [Install]
+          WantedBy=timers.target
+          EOF
+          sudo systemctl daemon-reload
+          sudo systemctl enable --now wly-bench-selfstop.timer
+          echo "installed. it should report itself busy right now:"
+          /opt/wly/bench-idle.sh
+          systemctl list-timers wly-bench-selfstop.timer --no-pager | head -3
