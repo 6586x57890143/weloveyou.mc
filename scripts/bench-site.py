@@ -83,7 +83,9 @@ code{font-family:var(--mono)}
 footer .hb{color:var(--heart)}
 
 h2{font-size:15px;font-weight:600;margin:2.25rem 0 .4rem;color:var(--fg-hi);
- letter-spacing:.1em;text-transform:uppercase}
+ letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:.7rem}
+/* Pixel art, so tell the browser not to smooth it. */
+.icon{image-rendering:pixelated;flex:0 0 auto;display:block}
 .sub{color:var(--dim);margin:0}
 
 .census b{color:var(--fg-hi);font-weight:600}
@@ -189,6 +191,105 @@ CAVEATS = [
     "<code>~</code> is inside the noise floor. <strong>FAILED</strong> means no run "
     "finished, which is a gap rather than a score of zero.",
 ]
+
+# Pixel icons, 8x8 because that is exactly how big a head is in a Minecraft
+# skin file. Drawn as inline SVG rects rather than an emoji or an image: the
+# page ships as one self-contained file with no external assets, and a run of
+# same-coloured pixels collapses into a single rect, so each of these costs a
+# few hundred bytes.
+ICON_PALETTE = {
+    "h": "#3A2A16",  # hair
+    "s": "#B58868",  # skin
+    "p": "#C8A882",  # villager skin, paler
+    "n": "#A97B57",  # that nose
+    "w": "#E8E8E8",  # eye white
+    "b": "#3A5FCD",  # eye
+    "m": "#6E4A32",  # mouth
+    "f": "#7A7A7A",  # machine frame
+    "d": "#3A3A3A",  # machine interior
+    "g": "#D8A657",  # a lit panel
+    "G": "#6A8F3C",  # grass
+    "D": "#79553A",  # dirt
+}
+
+ICONS = {
+    # Steve, more or less: hair, eyes, a suggestion of a mouth.
+    "player": [
+        "hhhhhhhh",
+        "hhhhhhhh",
+        "hssssssh",
+        "swbssbws",
+        "ssssssss",
+        "sssmmsss",
+        "ssssssss",
+        "ssssssss",
+    ],
+    # The villager is all brow and nose, which is the whole joke.
+    "villager": [
+        "hhhhhhhh",
+        "hhhhhhhh",
+        "pppppppp",
+        "pwpnnpwp",
+        "pppnnppp",
+        "pppnnppp",
+        "pppnnppp",
+        "pppppppp",
+    ],
+    # A machine: metal frame, lit face.
+    "machines": [
+        "ffffffff",
+        "fddddddf",
+        "fdggggdf",
+        "fdgddgdf",
+        "fdgddgdf",
+        "fdggggdf",
+        "fddddddf",
+        "ffffffff",
+    ],
+    # Grass on dirt, for the worldgen workloads.
+    "world": [
+        "GGGGGGGG",
+        "GGGGGGGG",
+        "DGDDGDDG",
+        "DDDDDDDD",
+        "DDDDDDDD",
+        "DDDDDDDD",
+        "DDDDDDDD",
+        "DDDDDDDD",
+    ],
+}
+
+# Which icon fronts which workload. Unknown workloads get none rather than a
+# wrong one.
+WORKLOAD_ICONS = {
+    "vanilla": "world",
+    "pack": "world",
+    "explore": "player",
+    "village": "villager",
+    "machines": "machines",
+}
+
+
+def icon(name):
+    """One 8x8 pixel icon as inline SVG, runs of colour collapsed into rects."""
+    rows = ICONS.get(name)
+    if not rows:
+        return ""
+    rects = []
+    for y, row in enumerate(rows):
+        x = 0
+        while x < len(row):
+            run = 1
+            while x + run < len(row) and row[x + run] == row[x]:
+                run += 1
+            if fill := ICON_PALETTE.get(row[x]):
+                rects.append(f'<rect x="{x}" y="{y}" width="{run}" height="1" fill="{fill}"/>')
+            x += run
+    return (
+        '<svg class="icon" viewBox="0 0 8 8" width="20" height="20" '
+        'aria-hidden="true" focusable="false">' + "".join(rects) + "</svg>"
+    )
+
 
 BASELINE = "baseline-j21"
 BAR_CELLS = 12
@@ -344,7 +445,10 @@ def workload_table(key, wl, parts):
     lower = bool(wl.get("primary_lower_is_better"))
     worldgen = wl.get("worldgen", True)
 
-    parts.append(f"<h2>{html.escape(wl.get('title', key))}</h2>")
+    parts.append(
+        '<h2>' + icon(WORKLOAD_ICONS.get(key, ""))
+        + f"<span>{html.escape(wl.get('title', key))}</span></h2>"
+    )
 
     # Collected and emitted as one row rather than as a stack of short
     # paragraphs, so they fill the width the table already occupies.

@@ -206,9 +206,12 @@ jobs:
           EOF
           sudo tee /etc/systemd/system/wly-bench-selfstop.timer >/dev/null <<'EOF'
           [Unit]
-          Description=Nightly idle check for the bench box
+          Description=Idle check for the bench box
           [Timer]
-          OnCalendar=*-*-* 23:30:00 UTC
+          # Every fifteen minutes, not nightly. A sweep that finishes at 15:00
+          # used to leave the box up until 23:30, which is eight and a half
+          # hours of an idle machine that bills by the hour.
+          OnCalendar=*:0/15
           Persistent=false
           [Install]
           WantedBy=timers.target

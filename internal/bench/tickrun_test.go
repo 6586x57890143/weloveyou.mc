@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -345,5 +346,36 @@ func TestTheRunRecordsWhatWouldChangeItsNumbers(t *testing.T) {
 		if strings.Contains(string(bare), absent) {
 			t.Errorf("%s should be omitted when unrecorded:\n%s", absent, bare)
 		}
+	}
+}
+
+func TestAFailedRunKeepsEnoughLogToExplainItself(t *testing.T) {
+	// "log ended before the run completed" is a symptom. The container is
+	// removed on the way out, so unless the tail is kept the cause is deleted
+	// with it - which is what happened to the first explore run.
+	p, cfg := testProfile()
+	var log strings.Builder
+	log.WriteString("[Server thread/INFO]: Done (1.0s)!\n")
+	for i := range tailLines * 2 {
+		fmt.Fprintf(&log, "[Server thread/INFO]: line %d\n", i)
+	}
+	log.WriteString("[Server thread/ERROR]: java.lang.OutOfMemoryError: Java heap space\n")
+
+	run, err := Execute(&fakeDocker{log: log.String()}, p, cfg, WorkloadVillage, nil,
+		Params{Load: 1}, clock(time.Second), tickTimeouts())
+	if err == nil {
+		t.Fatal("the run should have failed")
+	}
+	if len(run.Tail) != tailLines {
+		t.Fatalf("kept %d lines, want the last %d", len(run.Tail), tailLines)
+	}
+	// The last line is the one that says what happened.
+	if !strings.Contains(run.Tail[len(run.Tail)-1], "OutOfMemoryError") {
+		t.Errorf("the tail lost the line that explains the failure: %q",
+			run.Tail[len(run.Tail)-1])
+	}
+	// And it is bounded, so a long run does not carry its whole log around.
+	if strings.Contains(strings.Join(run.Tail, "\n"), "line 0\n") {
+		t.Error("the tail is unbounded")
 	}
 }

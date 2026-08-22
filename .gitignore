@@ -14,3 +14,7 @@ coverage.out
 # Claude Code personal settings
 /.claude/settings.local.json
 /site/
+
+# Python bytecode, which a local import of scripts/bench-site.py leaves behind.
+__pycache__/
+*.pyc

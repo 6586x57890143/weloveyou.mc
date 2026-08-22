@@ -137,6 +137,17 @@ func benchCmd(args []string, out io.Writer) error {
 				r, err := bench.Execute(dockerCLI{}, p, cfg, w, ok, par, time.Now, bench.DefaultTimeouts())
 				if err != nil {
 					fmt.Fprintf(out, "failed: %v\n", err)
+					// The container is removed on the way out, so this is the
+					// only chance to say WHY. Without it the report names a
+					// symptom and the evidence is already gone: the first
+					// tick-workload failure said "log ended before the run
+					// completed" and nothing else at all.
+					if r.Watchdog {
+						fmt.Fprintln(out, "    the watchdog declared a tick hung")
+					}
+					for _, line := range r.Tail {
+						fmt.Fprintf(out, "    | %s\n", line)
+					}
 					continue
 				}
 				res.Runs = append(res.Runs, r)
