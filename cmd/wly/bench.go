@@ -30,10 +30,20 @@ func benchCmd(args []string, out io.Writer) error {
 		runs     = fs.Int("runs", 3, "repeats per profile; medians are reported")
 		radius   = fs.Int("radius", 1000, "blocks to pregenerate")
 		only     = fs.String("only", "", "run just this profile")
+		shard    = fs.String("shard", "", `measure only this slice of the matrix, as "i/n"`)
+		rawPath  = fs.String("raw", "", "dump this shard's raw results here, for a later --merge")
+		merge    = fs.String("merge", "", "comma-separated raw result files to combine, instead of measuring")
 		dry      = fs.Bool("dry-run", false, "preflight the flags and print the plan, measure nothing")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+
+	// Merging is a different job from measuring: it takes shards that other
+	// boxes already produced and renders the combined table, so it needs no
+	// docker, no profiles file and no bench box.
+	if *merge != "" {
+		return mergeShards(*merge, *outPath, *jsonPath, out)
 	}
 
 	data, err := os.ReadFile(*profiles)
@@ -48,6 +58,13 @@ func benchCmd(args []string, out io.Writer) error {
 	todo, err := bench.Select(cfg.Runnable(), *only)
 	if err != nil {
 		return err
+	}
+	todo, err = bench.Shard(todo, *shard)
+	if err != nil {
+		return err
+	}
+	if len(todo) == 0 {
+		return fmt.Errorf("shard %s selects no profiles", *shard)
 	}
 	workloads, err := bench.ParseWorkloads(*workload)
 	if err != nil {
@@ -118,6 +135,20 @@ func benchCmd(args []string, out io.Writer) error {
 	}
 	fmt.Fprintf(out, "\nwrote %s\n", filepath.Base(*outPath))
 
+	// This shard's raw results, for the merge step to collect. Go-native rather
+	// than the presentation JSON, so a combined run goes through exactly the
+	// same Render path as a single-box one and the two cannot disagree.
+	if *rawPath != "" {
+		raw, err := bench.MarshalResults(results)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*rawPath, raw, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", *rawPath, err)
+		}
+		fmt.Fprintf(out, "wrote %s\n", filepath.Base(*rawPath))
+	}
+
 	// A sweep where every run failed still writes a report, and used to exit 0
 	// with it, so the workflow went green having measured nothing. Twelve
 	// hours of that is worse than a red build, because an empty file looks like
@@ -171,5 +202,37 @@ func writeReports(results []bench.Result, host, outPath, jsonPath string) error 
 	if err := os.WriteFile(jsonPath, append(doc, '\n'), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", jsonPath, err)
 	}
+	return nil
+}
+
+// mergeShards combines raw result files from several boxes into one report.
+func mergeShards(list, outPath, jsonPath string, out io.Writer) error {
+	var shards [][]byte
+	var names []string
+	for _, p := range strings.Split(list, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return fmt.Errorf("reading shard %s: %w", p, err)
+		}
+		shards = append(shards, raw)
+		names = append(names, filepath.Base(p))
+	}
+	if len(shards) == 0 {
+		return fmt.Errorf("--merge listed no readable files")
+	}
+	results, err := bench.MergeResults(shards)
+	if err != nil {
+		return err
+	}
+	host, _ := os.Hostname()
+	if err := writeReports(results, host, outPath, jsonPath); err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "merged %d shard(s) into %s: %s\n",
+		len(shards), filepath.Base(outPath), strings.Join(names, ", "))
 	return nil
 }

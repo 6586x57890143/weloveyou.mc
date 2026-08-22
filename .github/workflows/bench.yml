@@ -53,6 +53,16 @@ on:
         description: "Output file, use BENCHMARKS-screening.md for a screening pass"
         required: false
         default: BENCHMARKS.md
+      # One box takes about seven minutes per run, so 21 profiles across two
+      # workloads is most of a night, and a sweep that only fits overnight can
+      # only be run overnight. Splitting the matrix across boxes turns wall time
+      # into a spend decision, which is the right trade while credits expire
+      # unused. Needs that many runners carrying the `bench` label, otherwise
+      # the shards simply queue behind each other and nothing is gained.
+      shards:
+        description: 'JSON list of shards, e.g. ["1/3","2/3","3/3"]. Default runs everything on one box.'
+        required: false
+        default: '["1/1"]' 
   schedule:
     # Weekly. Frequent enough to catch a JDK or mod bump moving the numbers,
     # rare enough that the box is mostly available for playing on.
@@ -76,9 +86,15 @@ concurrency:
 
 jobs:
   sweep:
-    name: jvm sweep
+    name: jvm sweep ${{ matrix.shard }}
     runs-on: [self-hosted, bench]
     timeout-minutes: 720
+    strategy:
+      # fail-fast off: one shard dying should not throw away the measurements
+      # the others already paid for.
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(github.event.inputs.shards || '["1/1"]') }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -98,50 +114,18 @@ jobs:
             --out "$OUT" \
             --json "${OUT%.md}.json"
 
-      # A human merges. The sweep proposes; it does not decide what the server
-      # runs on.
-      - name: push the results when the numbers moved
-        env:
-          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
-        run: |
-          set -euo pipefail
-          # --porcelain, not `git diff`: a screening pass writes a file that is
-          # not tracked yet, and `git diff` cannot see an untracked file, so the
-          # first screening run would silently propose nothing.
-          JSON="${OUT%.md}.json"
-          if [ -z "$(git status --porcelain -- "$OUT" "$JSON")" ]; then
-            echo "no change in the numbers; nothing to propose"
-            exit 0
-          fi
-          branch="bench/$(date -u +%Y%m%d-%H%M)"
-          git switch -c "$branch"
-          git add -- "$OUT" "$JSON"
-          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
-          git push origin "$branch"
-
-          # Push the branch and hand over a link, rather than opening the PR
-          # here. Creating one from Actions needs "Allow GitHub Actions to
-          # create and approve pull requests" enabled repository-wide, and the
-          # first attempt died on a 403 after the numbers were already measured.
-          # Loosening a security setting on a public repository to save one
-          # click is the wrong trade, and the results still need a human to read
-          # them before they mean anything.
-          #
-          # (The attempt before that died on `gh: command not found`, this box
-          # is a plain Ubuntu ARM VM. Neither tool is needed now.)
-          {
-            echo "### sweep finished"
-            echo
-            echo "Results are on branch \`$branch\`."
-            echo
-            echo "[Open a pull request](https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1)"
-            echo
-            echo "Anything under ~5% is noise. A screening pass (runs=1) has no"
-            echo "variance to report and must not be compared against confirmed"
-            echo "numbers. The mod count each workload measured against is in the"
-            echo "report, the pack grows, and rows taken against different packs"
-            echo "are not comparable."
-          } >> "$GITHUB_STEP_SUMMARY"
+      # Each shard hands its raw measurements to the merge job rather than
+      # pushing its own branch: several boxes pushing at once would race, and
+      # the table has to be rendered from all of them together for the baseline
+      # comparison to mean anything.
+      - name: hand this shard's results to the merge job
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shard-${{ strategy.job-index }}
+          path: shard.json
+          if-no-files-found: warn
+          retention-days: 3
 
       # Always, including on failure: a crashed sweep that leaves the box running
       # costs more than the sweep did. An in-guest poweroff transitions the OCI
@@ -155,3 +139,69 @@ jobs:
         run: |
           echo "sweep finished; powering off to stop billing"
           sudo shutdown -h +1 "bench sweep complete" || sudo poweroff
+
+  # Rendering a table is not a measurement, so it has no business competing for
+  # the two cores that are. This also keeps the git push in one place: with
+  # several shards running, each pushing its own branch would race.
+  merge:
+    name: merge and publish
+    needs: sweep
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: shard-*
+          path: shards
+
+      - name: combine the shards
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+        run: |
+          set -euo pipefail
+          files=$(find shards -name 'shard.json' | paste -sd, -)
+          if [ -z "$files" ]; then
+            echo "::warning::no shard produced results; nothing to merge"
+            exit 0
+          fi
+          echo "merging: $files"
+          go run ./cmd/wly bench --merge "$files" \
+            --out "$OUT" --json "${OUT%.md}.json"
+
+      - name: push the results when the numbers moved
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+        run: |
+          set -euo pipefail
+          JSON="${OUT%.md}.json"
+          # --porcelain, not `git diff`: a screening pass writes a file that is
+          # not tracked yet, and `git diff` cannot see an untracked file.
+          if [ -z "$(git status --porcelain -- "$OUT" "$JSON")" ]; then
+            echo "no change in the numbers; nothing to propose"
+            exit 0
+          fi
+          branch="bench/$(date -u +%Y%m%d-%H%M)"
+          git switch -c "$branch"
+          git add -- "$OUT" "$JSON"
+          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
+          git push origin "$branch"
+          {
+            echo "### sweep finished"
+            echo
+            echo "Results are on branch \`$branch\`."
+            echo
+            echo "[Open a pull request](https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1)"
+            echo
+            echo "Anything under ~5% is noise. A screening pass (runs=1) has no"
+            echo "variance to report and must not be compared against confirmed"
+            echo "numbers. The mod count each workload measured against is in the"
+            echo "report: the pack grows, and rows taken against different packs"
+            echo "are not comparable."
+          } >> "$GITHUB_STEP_SUMMARY"

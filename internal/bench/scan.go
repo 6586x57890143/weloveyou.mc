@@ -1,6 +1,10 @@
 package bench
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
 
 // Scanner turns a container's log into a Run.
 //
@@ -144,4 +148,54 @@ type UnknownProfileError struct{ Name string }
 
 func (e *UnknownProfileError) Error() string {
 	return "no enabled profile named " + e.Name
+}
+
+// Shard narrows profiles to the slice this runner should measure.
+//
+// One box takes about seven minutes per run, and 21 profiles across two
+// workloads is most of a night. That is too long to be useful: a sweep that
+// only fits overnight can only be run overnight, and the last one was killed
+// before it finished. Splitting the list across several boxes turns wall time
+// into a spend decision, which is the right trade while credits expire unused.
+//
+// Round-robin rather than contiguous blocks, so the slow profiles (the pack
+// workload, the larger heaps) spread evenly instead of landing on one unlucky
+// shard and leaving the others idle.
+//
+// spec is "i/n", one-based: shard 1 of 3 takes profiles 0, 3, 6 and so on.
+func Shard(ps []Profile, spec string) ([]Profile, error) {
+	if spec == "" {
+		return ps, nil
+	}
+	i, n, err := parseShard(spec)
+	if err != nil {
+		return nil, err
+	}
+	var out []Profile
+	for k, p := range ps {
+		if k%n == i-1 {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func parseShard(spec string) (i, n int, err error) {
+	parts := strings.Split(spec, "/")
+	if len(parts) != 2 {
+		return 0, 0, &BadShardError{Spec: spec}
+	}
+	i, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+	n, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err1 != nil || err2 != nil || n < 1 || i < 1 || i > n {
+		return 0, 0, &BadShardError{Spec: spec}
+	}
+	return i, n, nil
+}
+
+// BadShardError is returned for a --shard value that is not a usable "i/n".
+type BadShardError struct{ Spec string }
+
+func (e *BadShardError) Error() string {
+	return "bad shard " + e.Spec + `; want "i/n" with 1 <= i <= n, for example 2/3`
 }
