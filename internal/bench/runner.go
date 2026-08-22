@@ -65,6 +65,23 @@ var SparkOpts = []string{"-Dspark.backgroundProfiler=false"}
 // pack repo and which nothing here was checking.
 const FabricAPIURL = "https://cdn.modrinth.com/data/P7dR8mSH/versions/Nlt8gI9z/fabric-api-0.116.15%2B1.21.1.jar"
 
+// CarpetURL is the load instrument: it supplies the fake players the tick
+// workloads drive.
+//
+// 1.4.147 is the only build declaring 1.21.1; carpet has moved on and is not
+// coming back to it, so this is pinned the same way spark and Chunky are, and
+// for the same reason - a stale pin surfaces as "server never reported ready",
+// which names the symptom and not the cause.
+//
+// It is loaded through MODS= as an instrument and is deliberately NOT in the
+// pack. A fake-player mod has no business shipping to players, and the pack
+// repo's side-checking has enough to worry about.
+//
+// Carpet fake players are real server players: they hold chunk tickets, they are
+// ticked and tracked, and mobs spawn around them. That is what makes them a
+// simulation of load rather than a summoned mob standing in for one.
+const CarpetURL = "https://cdn.modrinth.com/data/TQTTVgYE/versions/f2mvlGrg/fabric-carpet-1.21-1.4.147%2Bv240613.jar"
+
 // Env builds the container environment for one profile and workload.
 func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 	env := []string{
@@ -79,18 +96,35 @@ func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 		"JVM_XX_OPTS=" + strings.Join(xx, " "),
 		fmt.Sprintf("USE_AIKAR_FLAGS=%t", p.Aikar),
 	}
-	if w == WorkloadPack {
-		// spark rides alongside the pack too: without it there is no tick
-		// measurement for the workload that matters most. Its overhead is
-		// constant across profiles, so comparisons stay valid.
-		return append(env, "PACKWIZ_URL="+PackURL, "MODS="+SparkURL)
+	// What a workload loads is a property of the workload, so it comes from the
+	// spec table rather than from a branch here. spark is in every spec's Mods:
+	// without it there is no tick measurement for the workloads that matter
+	// most, and its overhead is constant across profiles, so comparisons stay
+	// valid.
+	sp := SpecFor(w)
+	if sp.Pack {
+		env = append(env, "PACKWIZ_URL="+PackURL)
 	}
-	return append(env, "MODS="+ChunkyURL+","+FabricAPIURL+","+SparkURL)
+	if len(sp.Mods) > 0 {
+		env = append(env, "MODS="+strings.Join(sp.Mods, ","))
+	}
+	return env
 }
 
 // Timeouts bound a single run. Exposed so tests need not wait on wall time.
+//
+// Boot and Generate were declared when this was written and then never read, so
+// a server that hung after starting was bounded only by whether its log happened
+// to end. They are wired now: a tick workload has no pregeneration line to wait
+// for, so an unbounded run would simply hold the box until the sweep's own
+// timeout killed it, and the box bills by the hour.
 type Timeouts struct {
-	Boot, Generate, Sample time.Duration
+	// Boot is how long the server has to report ready.
+	Boot time.Duration
+	// Generate is the hard cap on a whole run, whatever it is doing.
+	Generate time.Duration
+	// Sample is the interval between resource samples and spark queries.
+	Sample time.Duration
 }
 
 // DefaultTimeouts suit a 2-core box pregenerating a modest radius.
@@ -102,11 +136,15 @@ func DefaultTimeouts() Timeouts {
 // tear down. The container is always removed, including on failure - a bench
 // box littered with dead containers from crashed sweeps fills its disk and
 // then every later run fails for an unrelated reason.
-func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radius int,
+func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, par Params,
 	now func() time.Time, to Timeouts) (Run, error) {
 	if now == nil {
 		now = time.Now
 	}
+	if to.Sample <= 0 {
+		to.Sample = time.Second
+	}
+	sp := SpecFor(w)
 	name := fmt.Sprintf("bench-%s-%s", p.Name, w)
 	_ = c.Remove(name)
 	defer func() { _ = c.Remove(name) }()
@@ -121,31 +159,86 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 	defer rc.Close()
 
 	sc := NewScanner(now)
-	// Zero value means the first sample fires immediately once the server is up.
-	var lastSample time.Time
-	lines := bufio.NewScanner(rc)
-	lines.Buffer(make([]byte, 1<<20), 1<<20)
 
-	for lines.Scan() {
-		justReady := sc.Feed(lines.Text())
-		if justReady {
-			// Chunky needs telling how far and then to begin. Timing starts
-			// here rather than at the first progress line, so slow starts are
-			// counted rather than hidden.
-			_ = c.Exec(name, "rcon-cli", fmt.Sprintf("chunky radius %d", radius))
-			sc.StartGeneration()
-			_ = c.Exec(name, "rcon-cli", "chunky start")
+	// The log is read on its own goroutine and the run is driven by a select.
+	//
+	// It used to be `for lines.Scan()`, which works for Chunky because Chunky
+	// prints continuously, and DEADLOCKS a tick workload: a quiet server prints
+	// nothing, Scan blocks, and neither the sample clock nor the stop condition
+	// can fire. The `spark tps` reply is itself the only thing producing lines,
+	// and it cannot be issued from a loop that is blocked waiting for one.
+	//
+	// The goroutine only pushes text. Every Scanner call stays on this
+	// goroutine, so nothing shared is mutated from two places.
+	lines := make(chan string, 256)
+	readErr := make(chan error, 1)
+	go func() {
+		defer close(lines)
+		s := bufio.NewScanner(rc)
+		s.Buffer(make([]byte, 1<<20), 1<<20)
+		for s.Scan() {
+			lines <- s.Text()
 		}
+		readErr <- s.Err()
+	}()
+
+	tick := time.NewTicker(to.Sample)
+	defer tick.Stop()
+
+	begin := now()
+	// Zero value means the first sample fires as soon as warmup allows.
+	var lastSample, driveAt time.Time
+	steps := 0
+
+	for {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				return sc.Run(), logEnded(sc, sp, readErr)
+			}
+			if sc.Feed(line) {
+				// The drive script runs the moment the server is up. Timing
+				// starts here rather than at the first progress line, so slow
+				// starts are counted rather than hidden.
+				for _, cmd := range sp.Drive(par) {
+					_ = c.Exec(name, "rcon-cli", cmd)
+				}
+				sc.StartGeneration()
+				driveAt = now()
+			}
+		case <-tick.C:
+			// Nothing to do but re-check the clocks below. This case is the
+			// whole reason a silent server still gets sampled and still stops.
+		}
+
+		if !sc.Ready() {
+			if now().Sub(begin) >= to.Boot {
+				return sc.Run(), fmt.Errorf("server never reported ready within %s", to.Boot)
+			}
+			continue
+		}
+
+		// Warmup is discarded rather than averaged in. The first minutes are
+		// chunk loading, AlwaysPreTouch and JIT warmup; folding them into the
+		// median would measure startup and report it as tick health. Worldgen
+		// workloads have no warmup, so their numbers stay comparable to the
+		// ones taken before this existed.
+		warm := now().Sub(driveAt) >= sp.Warmup
 		// Sample on a clock, not per log line. Both calls below are expensive
 		// (`docker stats --no-stream` alone takes a second or two) and this
 		// block used to run for EVERY line the server printed. Worse, each
 		// `spark tps` reply is about ten more log lines, each of which
 		// triggered another sample: a feedback loop that dragged a seven minute
 		// run out to forty-five and reported ~1.0 chunks/s for every profile in
-		// a sweep that then took seven hours. Timeouts.Sample existed the whole
-		// time and was simply never read.
-		if sc.Ready() && now().Sub(lastSample) >= to.Sample {
+		// a sweep that then took seven hours.
+		if warm && now().Sub(lastSample) >= to.Sample {
 			lastSample = now()
+			if sp.Step != nil {
+				for _, cmd := range sp.Step(steps, par) {
+					_ = c.Exec(name, "rcon-cli", cmd)
+				}
+				steps++
+			}
 			// spark answers into the log asynchronously, so the scanner picks
 			// the reply up on a later line and the newest reading wins.
 			_ = c.Exec(name, "rcon-cli", "spark tps")
@@ -155,17 +248,38 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 				sc.Observe(rss, cpu)
 			}
 		}
+
 		if sc.Finished() {
 			return sc.Run(), nil
 		}
+		// A tick workload has no completion line to wait for; it is done when it
+		// has been under load long enough.
+		if sp.Steady > 0 && now().Sub(driveAt) >= sp.Warmup+sp.Steady {
+			return sc.Run(), nil
+		}
+		if now().Sub(begin) >= to.Generate {
+			return sc.Run(), fmt.Errorf("run exceeded %s", to.Generate)
+		}
 	}
-	if err := lines.Err(); err != nil {
-		return sc.Run(), fmt.Errorf("reading logs: %w", err)
+}
+
+// logEnded says what an exhausted log stream means, which depends on how far the
+// run got and on what shape of workload it was.
+func logEnded(sc *Scanner, sp Spec, readErr <-chan error) error {
+	select {
+	case err := <-readErr:
+		if err != nil {
+			return fmt.Errorf("reading logs: %w", err)
+		}
+	default:
 	}
 	if !sc.Ready() {
-		return sc.Run(), fmt.Errorf("server never reported ready")
+		return fmt.Errorf("server never reported ready")
 	}
-	return sc.Run(), fmt.Errorf("log ended before pregeneration finished")
+	if sp.Steady > 0 {
+		return fmt.Errorf("log ended before the run completed")
+	}
+	return fmt.Errorf("log ended before pregeneration finished")
 }
 
 // statsField splits one docker stats line on tabs. Tab rather than a space or a

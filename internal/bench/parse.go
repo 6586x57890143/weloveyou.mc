@@ -184,3 +184,18 @@ func ParseServerReady(line string) (time.Duration, bool) {
 	}
 	return time.Duration(secs * float64(time.Second)), true
 }
+
+// The watchdog kills a server whose tick has not returned. This is not a
+// hypothetical: Async parallelised entity ticking, its workers contended with
+// the server thread on two cores, invokeAll never returned once a player
+// joined, and sixty seconds later the watchdog force-killed production. It
+// crash-looped every few minutes until the mod was dropped.
+//
+// A run that ends this way must say so. Reported as a failure it looks like a
+// flaky container; reported as a missing row it looks like nothing happened. It
+// is the single most interesting outcome a tick workload can produce.
+var watchdog = regexp.MustCompile(
+	`(?i)(A single server tick took|Considering it to be crashed|watchdog.*stopping server)`)
+
+// ParseWatchdog reports whether a line is the watchdog announcing a hung tick.
+func ParseWatchdog(line string) bool { return watchdog.MatchString(line) }

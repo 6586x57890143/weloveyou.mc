@@ -35,8 +35,15 @@ func (f *fakeDocker) Exec(_ string, args ...string) error {
 	f.execs = append(f.execs, strings.Join(args, " "))
 	return nil
 }
-func (f *fakeDocker) Stats(string) (string, error) { return f.mem, f.memErr }
-func (f *fakeDocker) Remove(string) error          { f.removes++; return nil }
+func (f *fakeDocker) Stats(string) (string, error) {
+	// Counting here is the whole point of the field. It used to be missing, so
+	// TestExecuteSamplesOnAClockNotPerLogLine asserted against a permanently
+	// zero counter and could not fail - the regression guard for the sampling
+	// loop was not guarding anything.
+	f.statCalls++
+	return f.mem, f.memErr
+}
+func (f *fakeDocker) Remove(string) error { f.removes++; return nil }
 
 const happyLog = `[main/INFO]: Loading 87 mods
 [1.0s][info][gc] GC(1) Pause Young 8.500ms
@@ -63,7 +70,7 @@ func TestExecuteHappyPath(t *testing.T) {
 	f := &fakeDocker{log: happyLog, mem: "175.20%	2.5GiB / 11.6GiB"}
 
 	run, err := Execute(f, p, cfg, WorkloadPack, []string{"-XX:+UseCompactObjectHeaders"},
-		500, clock(time.Second), DefaultTimeouts())
+		Params{Radius: 500}, clock(time.Second), DefaultTimeouts())
 	if err != nil {
 		t.Fatalf("Execute() = %v", err)
 	}
@@ -100,7 +107,7 @@ func TestExecuteAlwaysRemovesTheContainer(t *testing.T) {
 		{"logs unavailable", &fakeDocker{logsErr: errors.New("no such container")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, _ = Execute(tc.f, p, cfg, WorkloadVanilla, nil, 100, clock(time.Second), DefaultTimeouts())
+			_, _ = Execute(tc.f, p, cfg, WorkloadVanilla, nil, Params{Radius: 100}, clock(time.Second), DefaultTimeouts())
 			if tc.f.removes < 2 {
 				t.Errorf("container removed %d times, want a pre-clean and a teardown", tc.f.removes)
 			}
@@ -122,7 +129,7 @@ func TestExecuteErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := Execute(tt.f, p, cfg, WorkloadVanilla, nil, 100, clock(time.Second), DefaultTimeouts())
+			_, err := Execute(tt.f, p, cfg, WorkloadVanilla, nil, Params{Radius: 100}, clock(time.Second), DefaultTimeouts())
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("Execute() = %v, want error containing %q", err, tt.want)
 			}
@@ -134,7 +141,7 @@ func TestExecuteToleratesStatsFailing(t *testing.T) {
 	// docker stats is best-effort; losing a sample must not lose the run.
 	p, cfg := testProfile()
 	f := &fakeDocker{log: happyLog, memErr: errors.New("stats unavailable")}
-	run, err := Execute(f, p, cfg, WorkloadVanilla, nil, 100, clock(time.Second), DefaultTimeouts())
+	run, err := Execute(f, p, cfg, WorkloadVanilla, nil, Params{Radius: 100}, clock(time.Second), DefaultTimeouts())
 	if err != nil {
 		t.Fatalf("Execute() = %v", err)
 	}
@@ -145,7 +152,7 @@ func TestExecuteToleratesStatsFailing(t *testing.T) {
 
 func TestExecuteDefaultsItsClock(t *testing.T) {
 	p, cfg := testProfile()
-	if _, err := Execute(&fakeDocker{log: happyLog}, p, cfg, WorkloadVanilla, nil, 100, nil, DefaultTimeouts()); err != nil {
+	if _, err := Execute(&fakeDocker{log: happyLog}, p, cfg, WorkloadVanilla, nil, Params{Radius: 100}, nil, DefaultTimeouts()); err != nil {
 		t.Fatalf("Execute() with a nil clock = %v", err)
 	}
 }
@@ -205,7 +212,7 @@ func TestExecuteSamplesOnAClockNotPerLogLine(t *testing.T) {
 	// A clock that never advances: no sample interval can ever elapse, so
 	// after the first sample there must be no more.
 	frozen := func() time.Time { return time.Unix(0, 0) }
-	if _, err := Execute(f, p, cfg, WorkloadPack, nil, 500, frozen, DefaultTimeouts()); err != nil {
+	if _, err := Execute(f, p, cfg, WorkloadPack, nil, Params{Radius: 500}, frozen, DefaultTimeouts()); err != nil {
 		t.Fatalf("Execute() = %v", err)
 	}
 	lines := strings.Count(strings.TrimSpace(happyLog), "\n") + 1

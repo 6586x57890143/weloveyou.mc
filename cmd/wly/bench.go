@@ -27,10 +27,11 @@ func benchCmd(args []string, out io.Writer) error {
 		profiles = fs.String("profiles", "jvm-profiles.toml", "profile definitions")
 		outPath  = fs.String("out", "BENCHMARKS.md", "where to write the results table")
 		jsonPath = fs.String("json", "BENCHMARKS.json", "where to write the machine-readable results")
-		workload = fs.String("workload", "both", "vanilla | pack | both")
+		workload = fs.String("workload", "both", "comma list, or one of: both | worldgen | players | all")
 		runs     = fs.Int("runs", 3, "repeats per profile; medians are reported")
 		radius   = fs.Int("radius", 1000, "blocks to pregenerate")
-		only     = fs.String("only", "", "run just this profile")
+		only     = fs.String("only", "", "comma-separated profiles to run (blank = all enabled)")
+		load     = fs.Float64("load", 1, "scale the tick workloads' entity and machine counts")
 		shard    = fs.String("shard", "", `measure only this slice of the matrix, as "i/n"`)
 		rawPath  = fs.String("raw", "", "dump this shard's raw results here, for a later --merge")
 		merge    = fs.String("merge", "", "comma-separated raw result files to combine, instead of measuring")
@@ -72,6 +73,27 @@ func benchCmd(args []string, out io.Writer) error {
 		return err
 	}
 
+	par := bench.Params{Radius: *radius, Load: *load}
+
+	// A dry run prints the drive script instead of measuring. This is the cheap
+	// proof that a workload's commands are well-formed: the alternative is
+	// finding out on a bench box that bills by the hour, from a log where a
+	// rejected command is one grey line among thousands.
+	if *dry {
+		for _, w := range workloads {
+			sp := bench.SpecFor(w)
+			fmt.Fprintf(out, "\n%s (%s)\n", w, sp.Title)
+			for _, cmd := range sp.Drive(par) {
+				fmt.Fprintf(out, "  drive: %s\n", cmd)
+			}
+			if sp.Step != nil {
+				for _, cmd := range sp.Step(0, par) {
+					fmt.Fprintf(out, "  step:  %s\n", cmd)
+				}
+			}
+		}
+	}
+
 	// Prove the probe works before trusting anything it says. Without this a
 	// stopped Docker daemon makes every flag look refused, every profile
 	// degrade to container defaults, and the sweep produce a full report that
@@ -98,20 +120,32 @@ func benchCmd(args []string, out io.Writer) error {
 		fmt.Fprintln(out)
 
 		for _, w := range workloads {
-			res := bench.Result{Profile: p.Name, Hardware: hw, Heap: p.Heap(), Workload: w, Dropped: dropped}
+			// Host is recorded here, where the measuring happens. Taking it at
+			// render time named the ubuntu-latest merge runner instead of the
+			// three Ampere boxes that produced the numbers.
+			res := bench.Result{Profile: p.Name, Host: host, Hardware: hw,
+				Heap: p.Heap(), Workload: w, Dropped: dropped}
 			if *dry {
 				results = append(results, res)
 				continue
 			}
+			sp := bench.SpecFor(w)
 			for i := range *runs {
 				fmt.Fprintf(out, "  %s run %d/%d ... ", w, i+1, *runs)
-				r, err := bench.Execute(dockerCLI{}, p, cfg, w, ok, *radius, time.Now, bench.DefaultTimeouts())
+				r, err := bench.Execute(dockerCLI{}, p, cfg, w, ok, par, time.Now, bench.DefaultTimeouts())
 				if err != nil {
 					fmt.Fprintf(out, "failed: %v\n", err)
 					continue
 				}
-				fmt.Fprintf(out, "%.1f chunks/s\n", r.ChunksPerSec())
 				res.Runs = append(res.Runs, r)
+				// Report the number this workload is actually read by. The old
+				// hardcoded chunks/s line printed 0.0 for a tick workload,
+				// which reads as a dead run rather than as a healthy one.
+				fmt.Fprintf(out, "%.1f %s", sp.Metric.Of(res), sp.Metric.Label)
+				if r.Watchdog {
+					fmt.Fprint(out, "  WATCHDOG KILLED THE SERVER")
+				}
+				fmt.Fprintln(out)
 			}
 			results = append(results, res)
 		}
@@ -231,8 +265,11 @@ func mergeShards(list, outPath, jsonPath string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	host, _ := os.Hostname()
-	if err := writeReports(results, host, outPath, jsonPath); err != nil {
+	// Deliberately no hostname here. The merge runs on a different machine from
+	// every box that measured anything - ubuntu-latest, in the workflow - so the
+	// merging machine's hostname names something that never ran a benchmark.
+	// Each Result carries the box that produced it; the renderer reads those.
+	if err := writeReports(results, "", outPath, jsonPath); err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "merged %d shard(s) into %s: %s\n",

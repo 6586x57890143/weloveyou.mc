@@ -135,24 +135,6 @@ func TestNewScannerDefaultsItsClock(t *testing.T) {
 	}
 }
 
-func TestParseWorkloads(t *testing.T) {
-	tests := []struct {
-		in   string
-		want int
-	}{{"vanilla", 1}, {"pack", 1}, {"both", 2}, {"", 2}}
-	for _, tt := range tests {
-		got, err := ParseWorkloads(tt.in)
-		if err != nil || len(got) != tt.want {
-			t.Errorf("ParseWorkloads(%q) = (%v, %v), want %d workloads", tt.in, got, err, tt.want)
-		}
-	}
-	if _, err := ParseWorkloads("nonsense"); err == nil {
-		t.Error("an unknown workload should be rejected")
-	} else if !strings.Contains(err.Error(), "vanilla, pack or both") {
-		t.Errorf("error should say what is allowed, got %q", err)
-	}
-}
-
 func TestSelect(t *testing.T) {
 	ps := []Profile{{Name: "a"}, {Name: "b"}}
 	if got, _ := Select(ps, ""); len(got) != 2 {

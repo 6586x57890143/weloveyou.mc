@@ -2,18 +2,6 @@ package bench
 
 import "time"
 
-// Workload identifies what was measured. A profile that wins on vanilla
-// worldgen and loses on the real pack is a finding, not noise, which is why
-// both are recorded rather than averaged together.
-type Workload string
-
-const (
-	// WorkloadVanilla is the control: stock worldgen, no content mods.
-	WorkloadVanilla Workload = "vanilla"
-	// WorkloadPack is the same run against the pack we actually ship.
-	WorkloadPack Workload = "pack"
-)
-
 // Run is one execution of one profile.
 type Run struct {
 	Chunks   int
@@ -26,6 +14,9 @@ type Run struct {
 	MSPTP95  float64 // spark: 95th-percentile tick duration, ms
 	TPS      float64 // spark: ticks per second, 20 is healthy
 	GCPauses []float64
+	// Watchdog is set when the server's own watchdog declared a tick hung.
+	// A profile that does this has not scored badly, it has failed.
+	Watchdog bool
 }
 
 // ChunksPerSec is the throughput figure the worldgen workloads exist to produce.
@@ -38,7 +29,15 @@ func (r Run) ChunksPerSec() float64 {
 
 // Result aggregates the repeats of one profile on one workload.
 type Result struct {
-	Profile  string
+	Profile string
+	// Host is the machine that MEASURED this, recorded at measure time.
+	//
+	// It exists because the merged report used to name the machine that
+	// RENDERED it: mergeShards calls os.Hostname() on the ubuntu-latest merge
+	// runner, so the first real sweep published `host: runnervm76f27` while the
+	// numbers came off three Ampere boxes. Empty on shards written before this
+	// field, which is why the renderers fall back rather than insist.
+	Host     string
 	Hardware Hardware // the machine this was measured on; shards may differ
 	Heap     string   // the heap it ran with, so a row is self-describing
 	Workload Workload
@@ -101,4 +100,15 @@ func (res Result) GCPause(p float64) float64 {
 		all = append(all, r.GCPauses...)
 	}
 	return Percentile(all, p)
+}
+
+// watchdogged reports whether any repeat of this result hung hard enough for the
+// server's own watchdog to kill it.
+func watchdogged(res Result) bool {
+	for _, r := range res.Runs {
+		if r.Watchdog {
+			return true
+		}
+	}
+	return false
 }
