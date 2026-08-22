@@ -71,10 +71,25 @@ java25plus = [
 #                but worldgen barely ticks entities, so TPS read 20 on every
 #                profile and the instrument measured nothing for weeks. The
 #                explore, village and machines workloads supply the load the
-#                instrument was waiting for. Calibrated at --load 1 (NOT yet
-#                verified on the bench box: raise it until MSPT p95 clears the
-#                idle floor on baseline-j21, then record the value here, because
-#                rows taken at different --load are not comparable)
+#                instrument was waiting for.
+#
+#                Calibrated on baseline-j21, 2026-08-22, radius 400, one run:
+#
+#                             --load 1   --load 3
+#                  explore     died       65.2 ms     (idle here is 0.2-0.7 ms)
+#                  village     10.7 ms    17.3 ms
+#                  machines     9.6 ms    10.5 ms
+#
+#                Use --load 3. A tick is 50 ms, so explore is already past the
+#                budget and the other two have room; anything lower and village
+#                and machines barely leave idle. Rows taken at different --load
+#                are NOT comparable, so this number moves only deliberately.
+#
+#                explore at --load 1 died four minutes in, before it patrolled:
+#                the bots ran outward forever and never reused a chunk. It
+#                completes now and is comfortably the heaviest of the three,
+#                which matches the intuition that travel, not entity count, is
+#                what hurts a two-core box.
 #   GC pauses    -Xlog:gc, parsed from the container log. Chosen over JFR after
 #                writing the driver: the pause distribution is the only thing
 #                the sweep needs from the collector, and a log line needs no
