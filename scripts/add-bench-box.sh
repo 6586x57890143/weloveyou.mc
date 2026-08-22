@@ -43,7 +43,11 @@ command -v gh >/dev/null || { echo "::error::gh is not on PATH"; exit 1; }
 ssh_prod() { ssh -i "$KEY" -o StrictHostKeyChecking=no "$PROD" "$@"; }
 
 echo "==> provisioning $NAME ($OCPUS ocpu / ${MEM}GB)"
-ssh_prod "/opt/deploy/provision-box.sh '$NAME' '$OCPUS' '$MEM'"
+# TS_PROVISION_KEY reaches provision-box.sh so cloud-init can join the tailnet
+# at first boot. Without it the box comes up unreachable: no public SSH by
+# convention, not on the tailnet, and no runner yet to reach it through. That is
+# what happened to bench-2 and bench-3, which had to be registered by hand.
+ssh_prod "TS_PROVISION_KEY='$TS_AUTHKEY' /opt/deploy/provision-box.sh '$NAME' '$OCPUS' '$MEM'"
 
 echo "==> waiting for $NAME on the tailnet"
 ip=""
