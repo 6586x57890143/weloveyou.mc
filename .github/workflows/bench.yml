@@ -112,7 +112,9 @@ jobs:
             --radius "${{ github.event.inputs.radius || '1000' }}" \
             --only "${{ github.event.inputs.only || '' }}" \
             --out "$OUT" \
-            --json "${OUT%.md}.json"
+            --json "${OUT%.md}.json" \
+            --shard "${{ matrix.shard }}" \
+            --raw shard.json
 
       # Each shard hands its raw measurements to the merge job rather than
       # pushing its own branch: several boxes pushing at once would race, and
