@@ -196,7 +196,34 @@ jobs:
           go run ./cmd/wly bench --merge "$files" \
             --out "$OUT" --json "${OUT%.md}.json"
 
-      - name: push the results when the numbers moved
+      - name: is this sweep fit to publish
+        id: gate
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+        run: |
+          set -uo pipefail
+          files=$(find shards -name 'shard.json' | paste -sd, -)
+          if [ -z "$files" ]; then
+            echo "verdict=empty" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Structural problems only: a sweep measured on two machines, against
+          # two packs, or with a dead baseline is misleading as a whole. A
+          # single profile that crashed is a finding, renders as FAILED, and
+          # still publishes.
+          if go run ./cmd/wly bench --validate "$files" 2>&1 | tee /tmp/validate.txt; then
+            echo "verdict=publish" >> "$GITHUB_OUTPUT"
+          else
+            echo "verdict=hold" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The results go straight to main and pages.yml picks them up from there.
+      # This used to push a branch and print a compare link for a human to open
+      # and merge, and the reported findings simply never got merged - so the
+      # site served "No results yet" while four sweeps sat on branches nobody
+      # looked at. The gate above is what replaced the human.
+      - name: publish
+        if: steps.gate.outputs.verdict == 'publish'
         env:
           OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
         run: |
@@ -205,24 +232,53 @@ jobs:
           # --porcelain, not `git diff`: a screening pass writes a file that is
           # not tracked yet, and `git diff` cannot see an untracked file.
           if [ -z "$(git status --porcelain -- "$OUT" "$JSON")" ]; then
-            echo "no change in the numbers; nothing to propose"
+            echo "the numbers did not move; nothing to publish"
             exit 0
           fi
-          branch="bench/$(date -u +%Y%m%d-%H%M)"
-          git switch -c "$branch"
+          # actions/checkout leaves a detached HEAD, so base the commit on
+          # current main explicitly. Switching carries the generated files over
+          # as working-tree changes.
+          git fetch --quiet origin main
+          git switch -c publish origin/main
           git add -- "$OUT" "$JSON"
-          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"
-          git push origin "$branch"
+          git -c user.name=bench -c user.email=bench@local commit -m "bench: refresh $OUT"             -m "Sweep ${GITHUB_RUN_ID}, harness ${GITHUB_SHA}."
+          # One retry: a doc change landing between the fetch and the push is
+          # ordinary, and losing a whole sweep to it would not be.
+          git push origin HEAD:main || {
+            git pull --rebase origin main
+            git push origin HEAD:main
+          }
           {
-            echo "### sweep finished"
+            echo "### published"
             echo
-            echo "Results are on branch \`$branch\`."
-            echo
-            echo "[Open a pull request](https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1)"
+            echo "\`$OUT\` is on main; pages.yml deploys it from there."
             echo
             echo "Anything under ~5% is noise. A screening pass (runs=1) has no"
-            echo "variance to report and must not be compared against confirmed"
-            echo "numbers. The mod count each workload measured against is in the"
-            echo "report: the pack grows, and rows taken against different packs"
-            echo "are not comparable."
+            echo "variance and must not be read next to confirmed numbers."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # A sweep that failed the gate still leaves its evidence somewhere, so the
+      # numbers can be read and the cause found. It just never reaches the page.
+      - name: park the results when the gate says no
+        if: steps.gate.outputs.verdict == 'hold'
+        env:
+          OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+        run: |
+          set -euo pipefail
+          JSON="${OUT%.md}.json"
+          branch="bench/held-$(date -u +%Y%m%d-%H%M)"
+          git switch -c "$branch"
+          git add -- "$OUT" "$JSON" 2>/dev/null || true
+          git -c user.name=bench -c user.email=bench@local             commit -m "bench: HELD, $OUT did not pass validation" || true
+          git push origin "$branch" || true
+          {
+            echo "### not published"
+            echo
+            echo "The sweep produced numbers that would mislead, so they were"
+            echo "parked on \`$branch\` instead of going to main:"
+            echo
+            echo '```'
+            cat /tmp/validate.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1
