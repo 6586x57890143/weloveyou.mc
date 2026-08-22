@@ -156,6 +156,90 @@ bruce-g1 = [
     "-XX:GCTimeRatio=99",
 ]
 
+# ---------------------------------------------------------------------------
+# The wly sets: tuned for THIS box rather than copied from a desktop guide
+# ---------------------------------------------------------------------------
+# Everything published about Minecraft JVM flags assumes a desktop with threads
+# to spare. This box has two cores, which changes which levers matter:
+#
+#   - GC thread counts are already right. The JVM sizes them from the CPU count,
+#     so two cores gets ParallelGCThreads=2 and ConcGCThreads=1 on its own. On a
+#     twelve-core desktop the same JVM picks 10 and 3, which is why copied flag
+#     sets so often pin numbers that only make sense there.
+#   - Pause targets fight the tick loop. A 37ms target on two cores just runs GC
+#     more often, and every one of those collections competes with the thread
+#     that has to finish a tick in 50ms. Aiming at one tick is honest; aiming
+#     under it is wishful.
+#   - Compact object headers are off by default and Minecraft is the archetypal
+#     small-object workload. This is the largest single lever available on 25.
+#
+# Nothing here is believed until it has a row. These are hypotheses with reasons,
+# which is the most a flag set can be before it is measured.
+
+# Neutral: no collector, no compiler assumptions. Safe on Temurin and GraalVM.
+wly-common = [
+    "-XX:+UnlockExperimentalVMOptions",
+    # JEP 519. 8-byte headers instead of 12/16, on a workload made of millions
+    # of small objects. FerriteCore exists to solve this problem in Java.
+    "-XX:+UseCompactObjectHeaders",
+    # Commit the heap up front. 6G of 12G, so there is room, and it keeps the
+    # allocator from stalling a tick to fault in new pages.
+    "-XX:+AlwaysPreTouch",
+    # Mods call System.gc(). A full stop-the-world collection mid-tick is worse
+    # than whatever the mod thought it was fixing.
+    "-XX:+DisableExplicitGC",
+    # Minecraft has genuinely huge methods and the default refuses to compile
+    # them, leaving hot code interpreted.
+    "-XX:-DontCompileHugeMethods",
+    # Many mods means a lot of JIT output. The default cache fills and the JIT
+    # starts discarding compiled code, which shows up as the server slowly
+    # getting worse rather than as an error.
+    "-XX:ReservedCodeCacheSize=384M",
+    # The perf memory file lives in /tmp and an fsync there can stall a tick.
+    "-XX:+PerfDisableSharedMem",
+]
+
+# G1 for two cores. Sized against 6G rather than against a desktop.
+wly-g1 = [
+    "-XX:+UseG1GC",
+    # One tick. Not 37ms: on two cores a tighter target buys more collections,
+    # each competing with the thread trying to finish that tick.
+    "-XX:MaxGCPauseMillis=50",
+    # Ergonomics picks 2M for this heap, giving ~3000 regions. 8M gives ~750,
+    # which is less per-region bookkeeping for the one core doing the marking.
+    "-XX:G1HeapRegionSize=8M",
+    # Minecraft allocates heavily and dies young. A larger young generation
+    # keeps that churn out of the old generation entirely.
+    "-XX:G1NewSizePercent=30",
+    "-XX:G1MaxNewSizePercent=50",
+    # Adaptive IHOP is on by default, which quietly overrides any value set for
+    # InitiatingHeapOccupancyPercent. Turn it off or do not bother setting one.
+    "-XX:-G1UseAdaptiveIHOP",
+    "-XX:InitiatingHeapOccupancyPercent=45",
+    # Default is 15, brucethemoose uses 1. Both extremes cost: 15 copies
+    # survivors repeatedly, 1 promotes everything to old gen and buys mixed
+    # collections. 4 is a guess in the middle, and it is a guess.
+    "-XX:MaxTenuringThreshold=4",
+]
+
+# The two-core bet: a collector that never runs beside the tick loop.
+#
+# Every concurrent collector spends CPU marking while the server ticks, and with
+# two cores that CPU comes out of the tick. Parallel stops the world, does the
+# work with both cores, and gets out. Longer individual pauses, none of them
+# competing. On a desktop this loses; here it might not, and that is exactly the
+# sort of thing nobody publishes because nobody benchmarks two cores.
+wly-parallel = [
+    "-XX:+UseParallelGC",
+    "-XX:MaxGCPauseMillis=50",
+]
+
+# GraalVM only. The jdk.graal prefix is the current one; the bare graal prefix
+# is deprecated and warns that it will be ignored in a future release.
+wly-graal = [
+    "-Djdk.graal.TuneInlinerExploration=1",
+]
+
 zgc-gen        = ["-XX:+UseZGC"]
 shenandoah-gen = ["-XX:+UseShenandoahGC", "-XX:ShenandoahGCMode=generational"]
 parallel       = ["-XX:+UseParallelGC"]
@@ -370,6 +454,55 @@ image = "itzg/minecraft-server:java25-graalvm"
 aikar = false
 flagsets = ["bruce-common", "shenandoah-gen", "coh"]
 enabled = false
+
+# ---------------------------------------------------------------------------
+# The wly suite: the same reasoning across three JDKs and two collectors
+# ---------------------------------------------------------------------------
+# These are the rows to beat. If none of them outrun aikar-on-25, that is a
+# finding too, and a cheaper one than believing they would.
+
+[profiles.j25-wly-g1]
+description = """
+G1 sized for two cores and a 6G heap rather than for a desktop. The whole set is
+argued in the flagsets above; the short version is that GC thread counts are
+already correct from ergonomics, so the levers that remain are compact object
+headers, region sizing, and not asking for a pause target shorter than a tick.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = false
+flagsets = ["wly-common", "wly-g1"]
+
+[profiles.j25-wly-parallel]
+description = """
+ParallelGC on two cores. Every concurrent collector spends CPU marking while the
+server ticks, and here that CPU comes straight out of the tick. Parallel stops
+the world, uses both cores, and gets out of the way. It should lose on paper and
+might not lose here.
+"""
+image = "itzg/minecraft-server:java25"
+aikar = false
+flagsets = ["wly-common", "wly-parallel"]
+
+[profiles.j25-wly-graalvm]
+description = """
+The same set on Oracle GraalVM, minus anything C2-specific, since Graal replaces
+C2 and those flags are accepted and then ignored. Chunk generation is the
+workload Graal's inliner is supposed to be good at, so if the JIT is worth
+anything here this is where it shows.
+"""
+image = "itzg/minecraft-server:java25-graalvm"
+aikar = false
+flagsets = ["wly-common", "wly-g1", "wly-graal"]
+
+[profiles.j21-wly-g1]
+description = """
+The same G1 set on 21, minus compact object headers, which do not exist before
+25. Isolates how much of any win is the flags and how much is simply the newer
+JDK: without this row the two are indistinguishable.
+"""
+image = "itzg/minecraft-server:java21"
+aikar = false
+flagsets = ["wly-common", "wly-g1"]
 
 # ---------------------------------------------------------------------------
 # Declared but disabled: each needs an image that does not exist yet
