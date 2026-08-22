@@ -14,6 +14,7 @@ cannot describe what it forbids is not much of a check.
 
 from __future__ import annotations
 
+import pathlib
 import sys
 from pathlib import Path
 
@@ -63,7 +64,39 @@ def main() -> int:
         else:
             print(f"  ok: {path.name} -> {', '.join(hosted)} "
                   f"(triggers: {', '.join(sorted(triggers(doc)))})")
+    if check_shard_is_wired() != 0:
+        failed = True
     return 1 if failed else 0
+
+
+def check_shard_is_wired():
+    """A sharded matrix that never passes --shard runs the whole sweep N times.
+
+    That is exactly what happened: the matrix was correct, the job names said
+    1/3, 2/3 and 3/3, and all three boxes worked through the same 21 profiles in
+    lockstep for hours. Nothing failed, nothing warned, and the only symptom was
+    three machines running an identically named container.
+
+    The two halves live in different places and neither is meaningful alone, so
+    check they agree.
+    """
+    path = pathlib.Path(".github/workflows/bench.yml")
+    if not path.exists():
+        return 0
+    text = path.read_text(encoding="utf-8")
+    has_matrix = "matrix.shard" in text or "shard:" in text
+    passes_flag = "--shard" in text
+    if has_matrix and not passes_flag:
+        print("::error::bench.yml has a shard matrix but never passes --shard, "
+              "so every shard would run the entire sweep")
+        return 1
+    if passes_flag and "--raw" not in text:
+        print("::error::bench.yml passes --shard but not --raw, so the shards "
+              "produce nothing for the merge job to combine")
+        return 1
+    if has_matrix:
+        print("  ok: bench.yml -> shard matrix is wired to --shard and --raw")
+    return 0
 
 
 if __name__ == "__main__":

@@ -21,6 +21,8 @@ func Render(results []Result, host string, when time.Time) string {
 	fmt.Fprintf(&b, "- medians of %s\n", repeatSummary(results))
 	fmt.Fprintf(&b, "- anything under %.0f%% is noise on a shared VM and is shown as `~`\n\n",
 		NoiseFloor*100)
+	writeHardware(&b, results)
+	b.WriteString("\n")
 
 	for _, w := range []Workload{WorkloadVanilla, WorkloadPack} {
 		rows := filter(results, w)
@@ -165,4 +167,26 @@ func droppedNote(rs []Result) string {
 		fmt.Fprintf(&b, "- `%s`: %s\n", n, strings.Join(seen[n], ", "))
 	}
 	return b.String()
+}
+
+// writeHardware names the machine, and refuses to be quiet when a table mixes
+// more than one.
+//
+// A sharded sweep runs on several boxes, and they are not automatically the
+// same: two provisioned on the same day came up AmpereOne with four threads
+// instead of Neoverse-N1 with two. Numbers from both in one table look like a
+// flag winning when they are really two different machines, so the mixture is
+// stated where the numbers are, not left in a commit message.
+func writeHardware(b *strings.Builder, results []Result) {
+	hw := HardwareSpread(results)
+	switch len(hw) {
+	case 0:
+	case 1:
+		fmt.Fprintf(b, "- measured on: %s\n", hw[0])
+	default:
+		b.WriteString("- **measured on more than one machine, so these rows are not directly comparable:**\n")
+		for _, h := range hw {
+			fmt.Fprintf(b, "  - %s\n", h)
+		}
+	}
 }

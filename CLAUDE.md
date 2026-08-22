@@ -222,6 +222,19 @@ of the few places the split costs something.
 - **CI uses no third-party actions** outside `actions/*` and `dependabot/fetch-metadata`.
   Release workflows hold write access to the repo and registry, every action they run is
   part of this project's supply chain. Everything else is plain CLI.
+- **Nothing is done until `scripts/coverage.sh` passes.** Not "it builds", not
+  "the tests pass": the floors are part of the definition of finished, and any
+  change that adds a statement has to carry a test for it in the same commit.
+  Three rules, each learned by breaking it:
+  - **Read the whole table, never grep one package out of it.** Adding
+    `writeReports` dropped `cmd/wly` under its floor while `internal/bench` was
+    filtered for and looked fine.
+  - **`docker` is on this machine and not on the runners**, so local `cmd/wly`
+    coverage is inflated. The binding number is
+    `PATH="/usr/bin:/bin:/c/Program Files/Go/bin:/c/Users/kon/go/bin" go test ./cmd/wly/ -cover`.
+    47.5% locally was 28.8% in CI, against a floor of 30.
+  - **Leave margin.** Landing exactly on the floor is a failure waiting for the
+    next commit: 99.0 against a floor of 99 went red in CI at 98.9.
 - **Coverage floors ratchet upward only.** Raise a floor when a package earns it; never lower
   one to make a red build green. `.coverage-floors` carries the reasoning.
 - **Keep the dependency list short.** Adding one needs justification in the commit message.

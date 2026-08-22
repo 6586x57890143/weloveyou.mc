@@ -159,3 +159,12 @@ func TestParseCPUPerc(t *testing.T) {
 		})
 	}
 }
+
+func TestParseMemUsageRejectsAnUnknownUnit(t *testing.T) {
+	// docker stats normally says GiB or MiB. Anything else is a format change,
+	// and guessing a multiplier would put a wrong number in the table rather
+	// than an obvious blank.
+	if got, ok := ParseMemUsage("2.5PB / 12GiB"); ok {
+		t.Errorf("ParseMemUsage accepted an unknown unit, got %v", got)
+	}
+}

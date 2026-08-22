@@ -39,7 +39,8 @@ func (r Run) ChunksPerSec() float64 {
 // Result aggregates the repeats of one profile on one workload.
 type Result struct {
 	Profile  string
-	Heap     string // the heap it ran with, so a row is self-describing
+	Hardware Hardware // the machine this was measured on; shards may differ
+	Heap     string   // the heap it ran with, so a row is self-describing
 	Workload Workload
 	Runs     []Run
 	Dropped  []string // flags the JVM refused during preflight

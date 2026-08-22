@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -81,6 +82,8 @@ func benchCmd(args []string, out io.Writer) error {
 	}
 
 	host, _ := os.Hostname()
+	hw := hardwareSnapshot()
+	fmt.Fprintf(out, "hardware: %s\n", hw)
 	fmt.Fprintf(out, "sweeping %d profile(s) x %d workload(s) x %d run(s) on %s\n",
 		len(todo), len(workloads), *runs, host)
 
@@ -95,7 +98,7 @@ func benchCmd(args []string, out io.Writer) error {
 		fmt.Fprintln(out)
 
 		for _, w := range workloads {
-			res := bench.Result{Profile: p.Name, Heap: p.Heap(), Workload: w, Dropped: dropped}
+			res := bench.Result{Profile: p.Name, Hardware: hw, Heap: p.Heap(), Workload: w, Dropped: dropped}
 			if *dry {
 				results = append(results, res)
 				continue
@@ -235,4 +238,35 @@ func mergeShards(list, outPath, jsonPath string, out io.Writer) error {
 	fmt.Fprintf(out, "merged %d shard(s) into %s: %s\n",
 		len(shards), filepath.Base(outPath), strings.Join(names, ", "))
 	return nil
+}
+
+// hardwareSnapshot describes the machine this sweep is running on.
+//
+// Recorded with every result because a sharded sweep spans several boxes, and
+// they are not automatically identical: two provisioned on the same day came up
+// AmpereOne with four threads rather than Neoverse-N1 with two, which would
+// have put numbers from two different machines in one table.
+//
+// Best effort throughout. A missing field costs a column, whereas failing the
+// sweep because lscpu is not installed would cost the measurement.
+func hardwareSnapshot() bench.Hardware {
+	var h bench.Hardware
+	if out, err := exec.Command("lscpu").Output(); err == nil {
+		h = bench.ParseLscpu(string(out))
+	}
+	// runtime knows these without shelling out, and is right when lscpu is
+	// absent or the platform is not Linux.
+	if h.CPUs == 0 {
+		h.CPUs = runtime.NumCPU()
+	}
+	if h.Arch == "" {
+		h.Arch = runtime.GOARCH
+	}
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		h.MemoryMB = bench.ParseMemTotal(string(b))
+	}
+	if out, err := exec.Command("uname", "-r").Output(); err == nil {
+		h.Kernel = strings.TrimSpace(string(out))
+	}
+	return h
 }
