@@ -44,9 +44,20 @@ func (p Pack) String() string {
 	case p.IndexHash == "":
 		return p.Version
 	case p.Version == "":
-		return p.IndexHash[:12]
+		return p.shortHash()
 	}
-	return fmt.Sprintf("%s (%s)", p.Version, p.IndexHash[:12])
+	return fmt.Sprintf("%s (%s)", p.Version, p.shortHash())
+}
+
+// shortHash is the first twelve characters, or all of them if there are fewer.
+// A sha256 is sixty-four, but a truncated or hand-edited pack.toml is not, and
+// slicing it blind panicked the renderer rather than printing an odd-looking
+// fingerprint.
+func (p Pack) shortHash() string {
+	if len(p.IndexHash) <= 12 {
+		return p.IndexHash
+	}
+	return p.IndexHash[:12]
 }
 
 // packFile is the shape of pack.toml that matters here. packwiz writes more

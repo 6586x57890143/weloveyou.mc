@@ -36,6 +36,7 @@ func benchCmd(args []string, out io.Writer) error {
 		shard    = fs.String("shard", "", `measure only this slice of the matrix, as "i/n"`)
 		rawPath  = fs.String("raw", "", "dump this shard's raw results here, for a later --merge")
 		merge    = fs.String("merge", "", "comma-separated raw result files to combine, instead of measuring")
+		validate = fs.String("validate", "", "check raw result files are publishable; exit non-zero if not")
 		dry      = fs.Bool("dry-run", false, "preflight the flags and print the plan, measure nothing")
 	)
 	if err := fs.Parse(args); err != nil {
@@ -47,6 +48,12 @@ func benchCmd(args []string, out io.Writer) error {
 	// docker, no profiles file and no bench box.
 	if *merge != "" {
 		return mergeShards(*merge, *outPath, *jsonPath, out)
+	}
+	// Validation is its own step so the workflow can merge, publish on a pass,
+	// and on a failure still keep the files somewhere a human can look. Neither
+	// needs docker, a profiles file or a bench box.
+	if *validate != "" {
+		return validateShards(*validate, out)
 	}
 
 	data, err := os.ReadFile(*profiles)
@@ -279,24 +286,7 @@ func writeReports(results []bench.Result, host, outPath, jsonPath string) error 
 
 // mergeShards combines raw result files from several boxes into one report.
 func mergeShards(list, outPath, jsonPath string, out io.Writer) error {
-	var shards [][]byte
-	var names []string
-	for _, p := range strings.Split(list, ",") {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		raw, err := os.ReadFile(p)
-		if err != nil {
-			return fmt.Errorf("reading shard %s: %w", p, err)
-		}
-		shards = append(shards, raw)
-		names = append(names, filepath.Base(p))
-	}
-	if len(shards) == 0 {
-		return fmt.Errorf("--merge listed no readable files")
-	}
-	results, err := bench.MergeResults(shards)
+	results, names, err := readShards(list)
 	if err != nil {
 		return err
 	}
@@ -308,7 +298,7 @@ func mergeShards(list, outPath, jsonPath string, out io.Writer) error {
 		return err
 	}
 	fmt.Fprintf(out, "merged %d shard(s) into %s: %s\n",
-		len(shards), filepath.Base(outPath), strings.Join(names, ", "))
+		len(names), filepath.Base(outPath), strings.Join(names, ", "))
 	return nil
 }
 
@@ -386,4 +376,55 @@ func javaVersion(image string) string {
 		}
 	}
 	return ""
+}
+
+// validateShards reports whether a sweep is fit to publish.
+//
+// Exit status is the contract: zero means the workflow may commit these numbers
+// to main, non-zero means it must not. Everything it complains about makes the
+// whole sweep misleading rather than one row of it - a profile that merely
+// crashed still publishes, marked FAILED, because that is a finding.
+func validateShards(list string, out io.Writer) error {
+	results, names, err := readShards(list)
+	if err != nil {
+		return err
+	}
+	problems := bench.Validate(results)
+	if len(problems) == 0 {
+		fmt.Fprintf(out, "%d result(s) from %s: publishable\n",
+			len(results), strings.Join(names, ", "))
+		return nil
+	}
+	fmt.Fprintf(out, "%d problem(s) that make this sweep misleading:\n", len(problems))
+	for _, p := range problems {
+		fmt.Fprintf(out, "  - %s\n", p)
+	}
+	return fmt.Errorf("these results are not publishable")
+}
+
+// readShards loads and combines raw result files, shared by merge and validate
+// so the two cannot disagree about what a sweep contains.
+func readShards(list string) ([]bench.Result, []string, error) {
+	var shards [][]byte
+	var names []string
+	for _, p := range strings.Split(list, ",") {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return nil, nil, fmt.Errorf("reading shard %s: %w", p, err)
+		}
+		shards = append(shards, raw)
+		names = append(names, filepath.Base(p))
+	}
+	if len(shards) == 0 {
+		return nil, nil, fmt.Errorf("no readable result files were named")
+	}
+	results, err := bench.MergeResults(shards)
+	if err != nil {
+		return nil, nil, err
+	}
+	return results, names, nil
 }
