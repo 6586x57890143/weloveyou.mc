@@ -1,9 +1,15 @@
 # Handoff 💖
 
 Notes for whoever picks this up next, including future me. Current as of
-**v0.2.0**, *last swept 2026-08-22*. If anything here disagrees with reality,
-reality wins and this file is stale, so check the live state with the commands
-below before believing it.
+**v0.2.0**, *last swept 2026-08-22 (evening)*.
+
+**Read this first if you are picking up Phase 2.** The benchmark harness is
+finished and trustworthy; the next work is the playable server, and it starts
+with backups because there are none. Jump to **What is next**, then the plan at
+`~/.claude/plans/scope-out-the-simulated-sleepy-canyon.md`.
+
+If anything here disagrees with reality, reality wins and this file is stale, so
+check the live state with the commands below before believing it.
 
 When something gets superseded it's marked in place instead of deleted. The
 reasoning behind a reversed decision is usually the expensive bit, and deleting
@@ -13,8 +19,8 @@ the line deletes the reason too. See **Keeping these docs honest** in
 ## What exists right now
 
 A joinable modded Minecraft server, a pack that publishes itself, and a
-benchmark harness that still has not produced a full table, for reasons
-now understood and fixed.
+benchmark harness that produces trustworthy numbers and publishes them without
+a human in the loop.
 
 | Thing | Where | State |
 |---|---|---|
@@ -23,7 +29,7 @@ now understood and fixed.
 | Platform repo | `github.com/6586x57890143/weloveyou.mc` | public, v0.2.0 |
 | Pack repo | `github.com/6586x57890143/weloveyou-pack` | public |
 | Bench boxes | `weloveyou-bench`, `-2`, `-3`, each A1 2 OCPU/12 GB | powered off unless sweeping |
-| Benchmarks | `weloveyou-bench.pox-nugget-mowing.workers.dev` | live; publishes on a merge to main |
+| Benchmarks | `weloveyou-bench.pox-nugget-mowing.workers.dev` | live with real numbers; publishes automatically |
 | Spend | `/var/lib/wly/cost.json` on the server | ~€0.03/day, credits expire 2026-09-15 |
 
 Minecraft 1.21.1, Fabric, Java 25, 71 pack entries, 143 mods loaded server-side.
@@ -111,10 +117,13 @@ Each was verified by reverting the real bug and watching it fail.
 
 ## Where things actually stand, 2026-08-22
 
-A sweep is running as this was written: run 32567742816, 25 profiles split
-across three bench boxes, screening pass at `runs=1 radius=400`. It is the first
-one that is both correct and actually parallel. Read its numbers before deciding
-anything about hardware, because every earlier number was produced by a bug.
+Run 32567742816 was the first sweep that was both correct and actually parallel:
+25 profiles across three boxes, screening at `runs=1 radius=400`. Its numbers are
+committed and on the site. Every number older than it was produced by a bug, so
+do not compare against anything earlier.
+
+Run 32583103771 added the tick workloads at `--load 3`. Between them they are
+the entire evidence base; the figures are under **Numbers to carry forward**.
 
 ### The benchmark was broken three separate ways, all now fixed
 
@@ -143,7 +152,64 @@ failed and nothing warned; the only symptom was three machines running an
 identically named container. `check-runners.py` now fails the build if the matrix
 and the flag ever disagree again.
 
+### What runs on the boxes, and what is not in this repo
+
+The production box carries machinery none of which is version controlled except
+where noted. This has already caused two documented bugs in `provision-box.sh`,
+and it is the same gap twice over.
+
+| path on the box | what it does | in the repo? |
+|---|---|---|
+| `/opt/deploy/deploy.sh`, `compose-up.sh`, `config` | the entire deploy mechanism | **no** |
+| `/opt/deploy/bench-power.sh` | start/stop one bench box, `BENCH_NAME=` selects it | **no** |
+| `/opt/deploy/provision-box.sh` | new bench boxes | yes, `deploy/provision-box.sh` |
+| `/opt/deploy/bench-reaper.sh` | stops idle bench boxes | yes, `deploy/bench-reaper.sh` |
+| `/opt/wly/bin/collect.sh`, `triage.sh`, `notify.sh` | the ntfy ops stack | **no** |
+| `/opt/wly/bin/gate.sh` | decides whether triage wakes the model | yes, `deploy/wly-health-gate.sh` |
+
+Timers on the production box: `wly-health` every 6h (gated), `wly-secaudit`
+daily, `wly-cost` daily 06:30, `wly-bench-reaper` every 10min,
+`wly-bench-up` Mondays 03:45.
+
+### The ops alerting was paying for silence
+
+`wly-health` fired hourly and called `claude -p` on **every** run. The push floor
+is MEDIUM, so almost all of those read a healthy snapshot, returned OK and
+pushed nothing: the tokens bought silence. `gate.sh` now decides whether the
+model is woken at all, from plain thresholds on fields `collect.sh` already
+writes, and the timer moved to every six hours.
+
+Two fields had to be fixed first, because both were permanently non-empty and
+would have fired the gate every single run anyway:
+
+- **`new_ports_vs_baseline`** compared text that included `pid=`, so any process
+  restart made every port look new. Now stripped alongside `fd=`, baseline
+  reseeded.
+- **`journal_errors`** carried a single sshd `kex_exchange_identification` line -
+  an internet scanner touching port 22, which happens continuously and means
+  nothing. The gate filters that class and counts anything else. Authentication
+  failures are deliberately **not** filtered.
+
+The gate is scoped to `quick` only. `wly-secaudit` runs the same `triage.sh` in
+`full` mode, and gating that would have quietly turned the daily security audit
+off - it exists to reason about CVEs and lynis findings on a box that looks
+fine, which is exactly what the gate suppresses.
+
+**Two things noticed and not acted on**, because they are decisions rather than
+bugs: port 22 is open to `0.0.0.0` on a box whose design is tailnet-only, and
+dozzle, a container log viewer, is published on `0.0.0.0:8080`. Both were
+already in the old ports baseline, so neither is newly hidden.
+
 ### Traps that cost real time
+
+**A merged branch still accepts pushes.** Four times in one session, work was
+pushed to a branch whose PR had already been squash-merged, and it silently went
+nowhere: the commits look fine, `git log` looks fine, and the content is simply
+absent from `main`. Squash-merging also means your own commits are never
+ancestors of `main`, so `git merge-base --is-ancestor` reports MISSING for work
+that did land. **Check `gh pr view <n> --json state` before every push, and
+verify landed work by grepping `main` for content markers, case-insensitively.**
+
 
 **A2 is not A1.** Both boxes provisioned on 2026-08-22 came up as
 `VM.Standard.A2.Flex`. A2 is AmpereOne with two vCPUs per OCPU against A1's one,
@@ -278,41 +344,136 @@ Some combinations are impossible and are declared disabled with the reason:
 GraalVM does not support Shenandoah, and JDK 26, Oracle JDK and OpenJ9 all need
 an image that does not exist yet.
 
-## What is next
+## What is next: make it a product, then stop
 
-**Reordered again 2026-08-22.** The benchmark took priority over the Discord
-work because the pack tripled in size and a mod that looked like a performance
-win crash-looped production instead. Simulated players were the next real piece,
-and the harness for them has landed (see above). What remains is not code: the
-sweep itself has never produced a committed row, so `BENCHMARKS.md` is still the
-placeholder and no flag choice here is measured. Run the three passes it
-documents before trusting anything about this box's JVM configuration.
+**Reframed 2026-08-22.** The benchmark works and has produced real numbers. The
+project stops being an optimisation experiment here. The remaining goal is a
+server that is pleasant to play, one written-down baseline, and then no more
+tuning. The full plan is at
+`~/.claude/plans/scope-out-the-simulated-sleepy-canyon.md`.
 
-**Reordered 2026-08-19.** Pack development came first: `weloveyou-pack` now has
-`scripts/pack-dev.sh` (add/rm/check/play), so a mod change can be joined on a
-local server before anything is published. `wly bench` then grew from six
-profiles to an 18-profile JDK x collector matrix.
+### Phase 1, harness trustworthiness: DONE
 
-Then phase 2, **the Discord design passes**, deliberately not code. Five
-surfaces need mockups before any bot is written, the get-started card first
-because it is where a new player either joins or gives up. The plan asks for
-2-3 distinct directions and real user input on each.
+Results now say what they measured and publish themselves.
 
-Then phases 4-6: `internal/packwiz` (Load + Diff only), `internal/mcevents`,
-then `cmd/wly serve`: the bot, the event bridge and the status board.
+- Every result records the pack version and its **index hash** (the content
+  fingerprint that changes if any file in the pack changes), Minecraft and
+  Fabric loader versions, the container image, the JVM's own version string,
+  the flags that survived preflight, and how many runs were attempted versus
+  finished.
+- `Env` **pins the Fabric loader from the pack**. It used to set `TYPE=FABRIC`
+  with no version, so the image resolved "latest for 1.21.1" at container start
+  while production compose pinned `0.19.3` - the bench could silently stop
+  measuring what production runs.
+- `wly bench --validate` is the gate. It blocks a sweep that is misleading as a
+  whole: nothing measured, a dead **baseline** (every `vs base` would compare
+  against zero), rows against different packs or different machines, impossible
+  numbers, or a pack workload that loaded no mods. A single crashed profile does
+  **not** block: it is a finding, renders as `FAILED`, and publishes.
+- On a pass the merge job commits to `main` and `pages.yml` deploys. On a
+  failure the numbers park on `bench/held-*`. **There is no human step any
+  more**, which is what fixed findings never reaching the page.
 
-`wly serve` is still a stub that exits immediately, which is why the `wly`
-service sits behind a `bot` compose profile and does not start.
+### Phase 2, make the server playable: NEXT, and where to start
 
-**One standing requirement:** `wly`'s daily push must include a spend line from
-`/var/lib/wly/cost.json`. Credits drain quietly and the first symptom would be
-a stopped server.
+Everything below came out of a full audit of `deploy/docker-compose.yml` on
+2026-08-22. It is what EXISTS, not speculation.
 
-That requirement is met on the phone but not yet in Discord. `wly-cost.service`
-now has a second step, `/opt/wly/bin/cost-push.sh`, which renders the report to
-ntfy daily at 06:30 UTC and shouts when it is missing, null, stale, spiking, or
-projecting past the budget. When the bot lands it should read the same file and
-say the same thing in the channel; the thresholds are in that script, not in Go.
+**Start with backups. There are none.** The world lives in exactly one Docker
+named volume (`mc-data`, `docker-compose.yml:111`). No snapshot, no copy, no
+off-box sync. A `docker compose down -v`, a `docker volume prune`, or losing the
+VM is total unrecoverable loss. Everything else in this phase is a tuning
+question; this one is a data-loss question.
+
+The agreed shape: nightly RCON `save-off` / `save-all` / tar / `save-on`, keep
+two archives on the box, ship one elsewhere. **The destination is explicitly
+temporary** - one shell function and one `BACKUP_TARGET` setting, not a design.
+Today that is a push over the tailnet to the desktop; object storage replaces it
+later. A desktop that is off means backups silently stop, so the script must
+alert through the ntfy path the box already uses when the last success is older
+than 36h, and the two local copies mean an offline desktop never leaves zero
+copies.
+
+**Voice chat cannot work today.** simple-voice-chat needs UDP 24454, which is
+not published, and `"25565:25565"` has no protocol suffix so Docker publishes
+**TCP only** - no UDP reaches the container at all. It fails with no server-side
+error, which is why nobody noticed. squaremap is unreachable for the same
+reason: no port published, though `wly.toml` is built around serving its tiles.
+
+**`VIEW_DISTANCE` and `SIMULATION_DISTANCE` are unset**, so they fall to itzg's
+defaults of 10/10 on a two-core box - while fifteen JVM flags are argued line by
+line above them. This is the cheapest TPS lever on this hardware and nobody has
+touched it. Set it once, deliberately, and write down why.
+
+Also: no `STOP_SERVER_ANNOUNCE_DELAY`, so every deploy drops players without
+warning. `itzg/minecraft-server:java25` is a **moving tag** with
+`docker compose pull` before every `up`, so the JVM can change under the server
+with no rollback lever - `WLY_IMAGE` covers `wly` only.
+`OVERRIDE_SERVER_PROPERTIES: "true"` silently reverts any hand edit on the box
+at the next restart.
+
+**Phase 2 touches the server players use.** It needs a restart window, not a
+silent change.
+
+### Phase 3, the frozen baseline
+
+Production runs `itzg/minecraft-server:java25` with `-XX:+UseCompactObjectHeaders`
+and that combination has **never been tick-tested**. The only config with tick
+evidence is `baseline-j21`. One final measurement is agreed - explore, village
+and machines on `baseline-j21`, `j25-g1-coh` and `j21-graalvm-g1-bruce`, at
+`--runs 3 --load 3`, roughly three hours - and then `production-2vcpu` is written
+into `jvm-profiles.toml` as the single source compose reads, and `PRODUCTION.md`
+records exact versions. You cannot freeze a baseline you have not measured; after
+that, the profile changes only for a reproducible crash, a correctness bug, a
+real gameplay problem, or a measured regression. Not for 1-3%.
+
+### Phases 4 and 5
+
+An eight-hour soak on a bench box against a throwaway world, reporting
+first-hour versus last-hour so "steadily increasing tick time" becomes a number
+rather than an impression. Then `LIMITATIONS.md` and stop.
+
+## Open work at the moment of this handoff
+
+- **PR #24** `harness-gate` - the validator and automatic publishing. Open,
+  CI green. Nothing else depends on it landing first.
+- Everything else from today is merged: #16, #19, #21, #22, #23.
+- **All three bench boxes are STOPPED.** `bench-reaper` is armed on the
+  production box every ten minutes and its hold file is cleared.
+- `deploy/bench-reaper.sh` and `/opt/wly/bin/gate.sh` are installed and live.
+
+Two loose ends worth knowing about:
+
+- **The sweep still needs the bench box powered on before a manual dispatch.**
+  The runner *is* the bench box, so nothing in the workflow can start it, and
+  the production box's SSH is a forced command that accepts only `deploy <ref>`.
+  The weekly cron is covered by `wly-bench-up.timer`. Documented, not solved.
+- **`bench.yml`'s `workload` input is a `choice`**, so GitHub rejects a comma
+  list like `explore,village` even though `ParseWorkloads` accepts one. Use the
+  `players` alias, or make it a free-text input.
+
+## Numbers to carry forward
+
+Measured on `weloveyou-bench-2`, `baseline-j21`, radius 400, one run each. Idle
+MSPT p95 on this box is 0.2-0.7ms, so all of these are real load.
+
+| workload | `--load 1` | `--load 3` | notes |
+|---|---|---|---|
+| explore | died | **65.2ms p95**, 43.3ms median, **19.97 TPS**, 200% CPU | past the 50ms tick budget; the only reading where the server cannot keep up |
+| village | 10.7ms | 17.3ms p95, 20 TPS, 111% CPU | 120 villagers |
+| machines | 9.6ms | 10.5ms p95, 20 TPS, 46% CPU | 9 Oritech rows |
+
+Worldgen, 25 profiles, screening pass: baseline J21 ~11.6 chunks/s, tuned J21
+~12.2, GraalVM J21 ~15.0 (+29.7%). GraalVM's win is on **vanilla worldgen only**
+- on the real pack every profile lands inside the noise floor. That is the
+finding the two-workload split exists to produce, and it is still a single run
+with no variance.
+
+**`--load 3` is the calibrated setting.** Lower and village and machines barely
+leave idle. Rows taken at different `--load` are not comparable.
+
+**Travel costs this box more than entity count does.** explore is comfortably
+the heaviest of the three, and it is the workload that saturates both cores.
 
 ## The plan
 
