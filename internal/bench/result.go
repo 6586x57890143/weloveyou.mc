@@ -17,6 +17,12 @@ type Run struct {
 	// Watchdog is set when the server's own watchdog declared a tick hung.
 	// A profile that does this has not scored badly, it has failed.
 	Watchdog bool
+	// Tail is the last few log lines, kept only so a failed run can say what
+	// happened. "log ended before the run completed" names the symptom and not
+	// the cause, and the container is gone by the time anyone reads it. Not
+	// serialised: a successful run does not need it, and a failed one is
+	// dropped before the results are written.
+	Tail []string `json:"-"`
 }
 
 // ChunksPerSec is the throughput figure the worldgen workloads exist to produce.

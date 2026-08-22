@@ -237,7 +237,7 @@ func exploreDrive(p Params) []string {
 	return out
 }
 
-// exploreStep moves every bot one stride further out along its own bearing.
+// exploreStep moves every bot along its bearing, out to the radius and back.
 //
 // Teleporting rather than walking is deliberate. A walking bot gets stuck on
 // terrain, drowns, or falls into a ravine, which would make the load depend on
@@ -245,8 +245,28 @@ func exploreDrive(p Params) []string {
 // exists to prevent. Teleporting is terrain-independent and repeatable, and it
 // is the honest simulation anyway: elytra and boat travel is how a player
 // actually generates chunk load churn.
+//
+// It patrols rather than running outward forever. The first version did
+// `stride * (n + 1)`, which never turns around: six bots generated brand new
+// terrain continuously for the whole steady window, reused nothing, and made
+// the total world size a function of how long the workload ran - so changing
+// Steady changed the answer, and two runs of different lengths were not
+// comparable. It is also the prime suspect for the run that died four minutes
+// in. Out and back keeps the churn going inside a bounded region.
 func exploreStep(n int, p Params) []string {
-	d := exploreStride(p) * (n + 1)
+	stride := exploreStride(p)
+	legs := p.Radius / stride
+	if legs < 1 {
+		legs = 1
+	}
+	// Triangle wave starting one stride out, so the very first step already
+	// moves somebody. Every bot keeps moving and none leaves the radius the
+	// workload was asked for.
+	phase := (n + 1) % (2 * legs)
+	if phase > legs {
+		phase = 2*legs - phase
+	}
+	d := stride * phase
 	var out []string
 	for _, b := range bots[:botCount(p.Load)] {
 		out = append(out, fmt.Sprintf("tp %s %d 120 %d", b.Name, b.DX*d, b.DZ*d))
@@ -307,10 +327,20 @@ func villageDrive(p Params) []string {
 	out = append(out, platform()...)
 	// Composters rather than beds: one block each, a valid farmer workstation,
 	// and one fill places the whole strip. Villagers pathing to a claimed POI is
-	// the expensive part, and that needs the POI to exist.
+	// the expensive part, and that needs the POI to exist - so the strip grows
+	// with the population. A fixed two rows was 82 workstations, which is fine
+	// for 40 villagers and starves 120: the surplus stop pathing and go idle,
+	// and the load stops rising with --load, which makes the knob a lie.
+	n := villagerCount(p.Load)
+	rows := n/(2*platformHalf+1) + 1
+	if rows > platformHalf {
+		rows = platformHalf
+	}
 	out = append(out, fmt.Sprintf("fill %d %d %d %d %d %d minecraft:composter",
-		-platformHalf, platformY+1, -platformHalf, platformHalf, platformY+1, -platformHalf+1))
-	for i := range scale(40, p.Load) {
+		-platformHalf, platformY+1, -platformHalf,
+		platformHalf, platformY+1, -platformHalf+rows))
+	for i := range n {
+		// Spread on a 2-block lattice, filling rows away from the composters.
 		x := -platformHalf + 2 + (i%18)*2
 		z := platformHalf - 2 - (i/18)*2
 		out = append(out, fmt.Sprintf("summon minecraft:villager %d %d %d", x, platformY+1, z))
@@ -359,6 +389,11 @@ func machinesDrive(p Params) []string {
 	out = append(out, fmt.Sprintf("player %s spawn at 0 %d 0", bots[0].Name, y+1))
 	return out
 }
+
+// villagerCount is the population this load asks for. 40 is a village; the
+// knob is there because how much of a village this box notices is a property
+// of the box, and 40 measured only 10.7ms p95 against a 50ms tick budget.
+func villagerCount(load float64) int { return scale(40, load) }
 
 // machineRows keeps the array inside the platform it is built on.
 func machineRows(load float64) int {

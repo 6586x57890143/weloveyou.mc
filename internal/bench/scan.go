@@ -11,8 +11,13 @@ import (
 // It lives here rather than in the command because reading a log is parsing,
 // not I/O: the caller owns the pipe, this owns the meaning. That split is what
 // makes the interesting half testable against a fixture instead of a container.
+// tailLines is how much of the log to keep for a post-mortem. Enough to carry
+// a stack trace header, an OOM line or the watchdog's complaint.
+const tailLines = 40
+
 type Scanner struct {
 	run      Run
+	tail     []string
 	ready    bool
 	finished bool
 	genStart time.Time
@@ -31,6 +36,10 @@ func NewScanner(now func() time.Time) *Scanner {
 // Feed consumes one log line. It reports whether the server has just become
 // ready, which is the caller's cue to start the pregeneration.
 func (s *Scanner) Feed(line string) (justReady bool) {
+	s.tail = append(s.tail, line)
+	if len(s.tail) > tailLines {
+		s.tail = s.tail[len(s.tail)-tailLines:]
+	}
 	if d, ok := ParseServerReady(line); ok && !s.ready {
 		s.run.Startup = d
 		s.ready = true
@@ -89,6 +98,7 @@ func (s *Scanner) Observe(rssBytes, cpuPercent float64) {
 // carried it.
 func (s *Scanner) Run() Run {
 	out := s.run
+	out.Tail = append([]string(nil), s.tail...)
 	if out.Elapsed == 0 && !s.genStart.IsZero() {
 		out.Elapsed = s.now().Sub(s.genStart)
 	}
