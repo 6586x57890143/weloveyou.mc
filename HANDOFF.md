@@ -19,13 +19,17 @@ now understood and fixed.
 | Thing | Where | State |
 |---|---|---|
 | Server | `weloveyou` @ `100.103.121.9` (tailnet), public `158.180.53.71` | live, healthy, whitelisted |
-| Pack | `weloveyou-pack.pages.dev/pack/stable/` | published, v0.1.4 |
+| Pack | `weloveyou-pack.pages.dev/pack/stable/` | published, v0.1.6 |
 | Platform repo | `github.com/6586x57890143/weloveyou.mc` | public, v0.2.0 |
 | Pack repo | `github.com/6586x57890143/weloveyou-pack` | public |
-| Bench box | `weloveyou-bench`, A1 2 OCPU/12 GB | **STOPPED** on purpose |
-| Spend | `/var/lib/wly/cost.json` on the server | ~€0.03/day |
+| Bench boxes | `weloveyou-bench`, `-2`, `-3`, each A1 2 OCPU/12 GB | powered off unless sweeping |
+| Benchmarks | `weloveyou-bench.pox-nugget-mowing.workers.dev` | live, placeholder until a sweep merges |
+| Spend | `/var/lib/wly/cost.json` on the server | ~€0.03/day, credits expire 2026-09-15 |
 
-Minecraft 1.21.1, Fabric, Java 25, 17 pack entries, 87 mods loaded server-side.
+Minecraft 1.21.1, Fabric, Java 25, 71 pack entries, 143 mods loaded server-side.
+
+The three bench boxes must all stay A1 with 2 OCPUs. They exist to measure the
+machine that serves players, and an A2 or a larger shape measures something else.
 
 ## Check the live state in one go
 
@@ -105,84 +109,109 @@ Each was verified by reverting the real bug and watching it fail.
 - **The exec bit does not survive a Windows checkout.** New scripts need
   `git update-index --chmod=+x`.
 
-## Where phase 1 actually stands
-
-`wly bench` is written and tested (98.8% on `internal/bench`) but **has never
-produced a number**. The open question it exists to answer:
-
-> Does `-XX:+UseCompactObjectHeaders` help a modded Minecraft server? JEP 519
-> went production in JDK 25, claims 22% less heap on SPECjbb, and Minecraft is
-> the archetypal small-object workload, FerriteCore exists because of it. No
-> published Minecraft numbers exist that I could find.
-
-It ships **on** in production today because it is a supported production
-feature, not because it has been measured here. That is the first row to fill.
-
-To run the sweep:
-
-```bash
-ssh -i ~/.ssh/oracle-weloveyou ubuntu@100.103.121.9 '/opt/deploy/bench-power.sh start'
-gh workflow run bench -R 6586x57890143/weloveyou.mc -f workload=both -f runs=3
-# the sweep powers the box off when it finishes, always, including on failure
-```
-
-Expect ZGC to lose: it costs 10-15% CPU and there are two cores.
-
 ## Where things actually stand, 2026-08-22
 
-The sweep has still never produced a usable table, and the reasons are now known
-and fixed rather than suspected.
+A sweep is running as this was written: run 32567742816, 25 profiles split
+across three bench boxes, screening pass at `runs=1 radius=400`. It is the first
+one that is both correct and actually parallel. Read its numbers before deciding
+anything about hardware, because every earlier number was produced by a bug.
 
-**The 7-hour sweep was our bug, not the hardware.** It ran 7h11m, finished 9 of
-42 runs, reported ~1.0 chunks/s for everything, and saved nothing.
-`Timeouts.Sample` was declared and never read, so `docker stats --no-stream`
-(1-2s each) and `rcon-cli spark tps` ran for *every log line*. Each spark reply
-is ten more lines, each triggering another sample, so it compounded. The same box
-did 8.1-8.4 chunks/s before spark landed. Any conclusion about ARM being too slow
-came from those broken numbers, so it should be re-formed after a clean run.
+### The benchmark was broken three separate ways, all now fixed
 
-**The idle timer killed it.** `wly-bench-idle.timer` on the production box fires
-at 23:30 UTC to stop a box left running by a crashed sweep; it stopped a healthy
-one. A busy-aware replacement is installed on the bench box itself (only that box
-can see whether a job is running) via `bench-admin.yml -> self-stop`. The old
-production-side timer should be disabled once the new one is confirmed.
+**Sampling ran per log line.** `Timeouts.Sample` was declared and never read, so
+`docker stats --no-stream` (one to two seconds each) and `rcon-cli spark tps` ran
+for every line the server printed. Each spark reply is about ten more lines, each
+triggering another sample, so the cost compounded. A seven minute run took
+forty-five, and every profile reported roughly 1.0 chunks/s, which looked like
+the flags making no difference. The same box did 8.1-8.4 before spark was added.
 
-**The bench box drops off the tailnet on every reboot.** The `TS_AUTHKEY` is
-ephemeral, so the node is deleted when it goes offline. Re-run
-`bench-admin.yml -> tailscale-up` after each boot, or use the workflow actions
-instead of SSH.
+**Results were only written at the end.** A sweep that died partway lost
+everything. One ran seven hours, completed nine runs and saved nothing. Reports
+are now written after every profile.
 
-**The live server was three days stale.** It ran the old 17-entry pack (87 mods)
-while v0.1.5 with 72 entries was published, because a pack release only takes
-effect on restart and nothing restarts it. Restarted 2026-08-22: now
-`Loading 143 mods`, healthy. This is the gap `wly serve` is meant to close.
+**The idle timer killed a healthy sweep.** `wly-bench-idle.timer` on the
+production box fired at 23:30 UTC and stopped a running job. It is now disabled
+there, replaced by `wly-bench-selfstop.timer` on each bench box, which checks for
+a `Runner.Worker` process or a `bench-` container first. Reinstall it after
+reprovisioning with `bench-admin.yml -> self-stop`; only the bench box can see
+whether a job is running, because the production box holds no key for it.
 
-**The client Java guard had been switched off.** `deps-check.py` was set to
-`client: 25` while the Prism instance pinned no JRE, so stock installs still got
-21. That is the C2ME bug class the check exists to catch. Fixed by pinning a java
-component in `mmc-pack.json` (`weloveyou-pack#4`).
+**And the shards were not sharding.** `bench.yml` had the matrix, the job names
+said 1/3, 2/3 and 3/3, and all three boxes worked through the same 21 profiles in
+lockstep for hours. The workflow never passed `--shard` or `--raw`. Nothing
+failed and nothing warned; the only symptom was three machines running an
+identically named container. `check-runners.py` now fails the build if the matrix
+and the flag ever disagree again.
 
-### Open PRs
+### Traps that cost real time
 
-- `weloveyou.mc#10` sampling fix, incremental writes, TPS into JSON, self-stop action
-- `weloveyou-pack#4` pin Java 25 in the instance
+**A2 is not A1.** Both boxes provisioned on 2026-08-22 came up as
+`VM.Standard.A2.Flex`. A2 is AmpereOne with two vCPUs per OCPU against A1's one,
+so 2 OCPU means four threads rather than two. `provision-box.sh` broke out of its
+wait loop on `RUNNING` without ever checking the shape, so an unconverted box was
+reported as a success. Caught by hand before either took a shard. The script now
+refuses to return anything that is not A1, and lives in the repo at
+`deploy/provision-box.sh` so the next bug like it is visible in a diff.
 
-### What the benchmark still needs
+**Every new box came up unreachable.** Cloud-init installed tailscale and never
+ran `tailscale up`, and there is no public SSH by convention, so a fresh box had
+no way in and no runner yet to reach it through. Cloud-init now joins at first
+boot. Use a **one-off, non-ephemeral** key: one-off limits how many devices a key
+can add, ephemeral deletes the node once it goes offline, and they are
+independent. The repo's existing `TS_AUTHKEY` is ephemeral, which is right for
+`release.yml` and wrong for a box that is powered off most of the time. Do not
+use a reusable key; the box authenticates once in its life.
 
-- **Simulated players.** Worldgen is throughput-bound, so TPS reads ~20 on every
-  profile and says nothing. TPS and MSPT p95 are wired end to end (spark, with
-  `-Dspark.backgroundProfiler=false`, otherwise it segfaults on Java 25/aarch64),
-  but they only become meaningful under a workload C that puts real tick load on
-  the server. This is the missing piece, not the metric.
-- **A re-run before any hardware decision.** Fix is in, so a clean sweep is cheap.
-  If honest numbers are still poor: bigger A1 or an x86 box first (credits expire
-  15 September and a sweep costs well under EUR 1), then the local-PC pivot behind
-  the Oracle VPS. If production hardware moves, the bench box has to move with it
-  or the numbers describe a machine nobody uses.
-- **The pack tripled.** 17 entries to 72, 143 mods loaded. Re-check `radius` and
-  the profile count so a full sweep fits comfortably inside one night.
+**Async deadlocks this server.** It parallelises entity ticking, works well on a
+twelve-thread desktop, and on two cores its workers contend with the server
+thread waiting on them. A player joins, `invokeAll` never returns, the tick stops
+(which is what "cannot interact with anything" was), and sixty seconds later the
+watchdog force-kills the server. It crash-looped production every few minutes
+until it was dropped in `stable-v0.1.6`. Recreating the world would not have
+helped: the trigger is a player, and a fresh world has one the moment you log in.
+
+That is a hardware finding rather than a mod bug, and unlike the benchmark
+numbers it came from a real failure. If the mods worth having assume spare cores,
+two Ampere cores is the wrong host, and no flag sweep fixes that.
+
+**Pack releases do not reach the server on their own.** It ran the old 17-entry
+pack for three days while v0.1.5 was published, because a release only takes
+effect on restart and nothing restarts it. This is the gap `wly serve` exists to
+close.
+
+### What the benchmark still cannot answer
+
+**TPS and MSPT are wired end to end but mean nothing yet.** spark reports them
+(with `-Dspark.backgroundProfiler=false`, or its async-profiler segfaults the JVM
+on Java 25/aarch64), and they reach the table, the JSON and the site. But
+worldgen pregeneration barely ticks entities, so TPS reads 20 on every profile.
+The instrument exists; the load does not. **Simulated players are the missing
+piece**, and they are what would have caught Async before it reached production.
+
+**Every result now records its hardware**: model, cores, threads per core, RAM,
+arch. A table that mixes machines says so, in the report and on the site. That is
+what makes "this mod needs cores" a column rather than folklore.
+
+### The profile matrix
+
+25 enabled profiles, two dimensions crossed: Temurin 21 and 25, GraalVM 21 and
+25, against G1, Parallel, Serial, ZGC and generational Shenandoah, plus a heap
+sweep at 4/6/8/10G on the shipping profile. Four `wly-*` profiles are tuned for
+this box specifically rather than copied from a desktop guide; the reasoning is
+in `jvm-profiles.toml` next to each flag. Nothing in it is believed until it has
+a row.
+
+Some combinations are impossible and are declared disabled with the reason:
+GraalVM does not support Shenandoah, and JDK 26, Oracle JDK and OpenJ9 all need
+an image that does not exist yet.
 
 ## What is next
+
+**Reordered again 2026-08-22.** The benchmark took priority over the Discord
+work because the pack tripled in size and a mod that looked like a performance
+win crash-looped production instead. Simulated players are the next real piece:
+without them TPS is pinned at 20 and the suite cannot see the failures that
+actually matter.
 
 **Reordered 2026-08-19.** Pack development came first: `weloveyou-pack` now has
 `scripts/pack-dev.sh` (add/rm/check/play), so a mod change can be joined on a
