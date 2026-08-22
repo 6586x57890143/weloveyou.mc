@@ -76,6 +76,21 @@ func benchCmd(args []string, out io.Writer) error {
 
 	par := bench.Params{Radius: *radius, Load: *load}
 
+	// Resolve the pack once, before anything is measured. PackURL is a channel,
+	// not a version, so without this two sweeps a week apart can measure
+	// different content and nothing in the output would say so. A rotted URL
+	// fails the sweep here rather than producing rows against a pack nobody
+	// can identify.
+	if wantsPack(workloads) {
+		pk, err := bench.FetchPack(bench.PackURL)
+		if err != nil {
+			return fmt.Errorf("resolving the pack under test: %w", err)
+		}
+		par.Pack = pk
+		fmt.Fprintf(out, "pack: %s (minecraft %s, loader %s)\n",
+			pk, pk.Minecraft, pk.Fabric)
+	}
+
 	// A dry run prints the drive script instead of measuring. This is the cheap
 	// proof that a workload's commands are well-formed: the alternative is
 	// finding out on a bench box that bills by the hour, from a log where a
@@ -106,6 +121,7 @@ func benchCmd(args []string, out io.Writer) error {
 
 	host, _ := os.Hostname()
 	hw := hardwareSnapshot()
+	commit := sweepCommit()
 	fmt.Fprintf(out, "hardware: %s\n", hw)
 	fmt.Fprintf(out, "sweeping %d profile(s) x %d workload(s) x %d run(s) on %s\n",
 		len(todo), len(workloads), *runs, host)
@@ -114,6 +130,10 @@ func benchCmd(args []string, out io.Writer) error {
 	for _, p := range todo {
 		flags := append(append([]string{}, bench.Unlockers...), p.XX...)
 		ok, dropped := bench.Preflight(p.Image, flags, dockerProbe)
+		// The probe already starts this JVM to ask what it accepts; asking it
+		// what it IS costs one more container and answers "which Java 25?",
+		// which the profile name only implies.
+		java := javaVersion(p.Image)
 		fmt.Fprintf(out, "\n%s (%s)\n  flags kept: %d", p.Name, p.Image, len(ok))
 		if len(dropped) > 0 {
 			fmt.Fprintf(out, ", refused: %s", strings.Join(dropped, " "))
@@ -126,7 +146,9 @@ func benchCmd(args []string, out io.Writer) error {
 			// three Ampere boxes that produced the numbers.
 			res := bench.Result{Profile: p.Name, Host: host, Hardware: hw,
 				Heap: p.Heap(), Workload: w, Dropped: dropped,
-				Commit: buildinfo.Commit(), Radius: par.Radius, Load: par.Load}
+				Commit: commit, Radius: par.Radius, Load: par.Load,
+				Image: p.Image, Java: java, JVMArgs: ok, Pack: par.Pack,
+				Attempted: *runs}
 			if *dry {
 				results = append(results, res)
 				continue
@@ -319,4 +341,49 @@ func hardwareSnapshot() bench.Hardware {
 		h.Kernel = strings.TrimSpace(string(out))
 	}
 	return h
+}
+
+// wantsPack reports whether any selected workload loads the published pack.
+// The vanilla control does not, so a sweep of it alone need not resolve one.
+func wantsPack(ws []bench.Workload) bool {
+	for _, w := range ws {
+		if bench.SpecFor(w).Pack {
+			return true
+		}
+	}
+	return false
+}
+
+// sweepCommit identifies the source this sweep ran from.
+//
+// GITHUB_SHA first, because the workflow invokes the harness as `go run`, and
+// Go stamps vcs.revision for `go build` and `go install` but NOT for `go run`.
+// buildinfo.Commit() therefore returned "" on the bench box, and the field was
+// omitempty, so every committed result silently carried no commit at all while
+// looking like it was designed to.
+func sweepCommit() string {
+	if sha := os.Getenv("GITHUB_SHA"); sha != "" {
+		return sha
+	}
+	return buildinfo.Commit()
+}
+
+// javaVersion asks a profile's JVM what it is.
+//
+// `java -version` writes to stderr, which is why this reads CombinedOutput and
+// takes the first line: "openjdk version \"21.0.5\" 2024-10-15" or the GraalVM
+// equivalent. Best effort - a profile name implies a JDK, but only the JVM can
+// say which build of it.
+func javaVersion(image string) string {
+	out, err := exec.Command("docker", "run", "--rm", "--entrypoint", "java",
+		image, "-version").CombinedOutput()
+	if err != nil {
+		return ""
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
 }

@@ -159,7 +159,7 @@ func TestExecuteDefaultsItsClock(t *testing.T) {
 
 func TestEnvSelectsTheWorkloadSource(t *testing.T) {
 	p, cfg := testProfile()
-	pack := strings.Join(Env(p, cfg, WorkloadPack, nil), " ")
+	pack := strings.Join(Env(p, cfg, WorkloadPack, nil, Params{}), " ")
 	if !strings.Contains(pack, "PACKWIZ_URL="+PackURL) {
 		t.Errorf("pack workload must come from the published pack: %s", pack)
 	}
@@ -170,7 +170,7 @@ func TestEnvSelectsTheWorkloadSource(t *testing.T) {
 	}
 	// The control loads the instruments and nothing else; a content mod here
 	// would make it not a control.
-	van := strings.Join(Env(p, cfg, WorkloadVanilla, nil), " ")
+	van := strings.Join(Env(p, cfg, WorkloadVanilla, nil, Params{}), " ")
 	if !strings.Contains(van, ChunkyURL) || strings.Contains(van, "PACKWIZ_URL") {
 		t.Errorf("vanilla workload env = %s", van)
 	}

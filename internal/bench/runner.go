@@ -21,6 +21,10 @@ type Container interface {
 	Remove(name string) error
 }
 
+// DefaultMinecraft is the version a run uses when no pack declares one, which
+// is the vanilla control.
+const DefaultMinecraft = "1.21.1"
+
 // BenchSeed is fixed so every profile generates the same terrain. Comparing
 // runs over different worlds would measure the seed, not the flags.
 const BenchSeed = "weloveyou-bench"
@@ -83,9 +87,21 @@ const FabricAPIURL = "https://cdn.modrinth.com/data/P7dR8mSH/versions/Nlt8gI9z/f
 const CarpetURL = "https://cdn.modrinth.com/data/TQTTVgYE/versions/f2mvlGrg/fabric-carpet-1.21-1.4.147%2Bv240613.jar"
 
 // Env builds the container environment for one profile and workload.
-func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
+func Env(p Profile, cfg *Config, w Workload, xx []string, par Params) []string {
+	// Minecraft and the loader come from the pack when one is known, so the
+	// bench runs what the pack declares. TYPE=FABRIC with no loader version let
+	// the image resolve "latest for 1.21.1" at container start, which meant two
+	// sweeps a month apart could silently run different loaders while
+	// production compose pinned 0.19.3.
+	mc, loader := DefaultMinecraft, ""
+	if par.Pack.Minecraft != "" {
+		mc = par.Pack.Minecraft
+	}
+	if par.Pack.Fabric != "" {
+		loader = par.Pack.Fabric
+	}
 	env := []string{
-		"EULA=TRUE", "TYPE=FABRIC", "VERSION=1.21.1", "MEMORY=" + p.Heap(),
+		"EULA=TRUE", "TYPE=FABRIC", "VERSION=" + mc, "MEMORY=" + p.Heap(),
 		"LEVEL=" + BenchSeed, "SEED=" + BenchSeed,
 		"ONLINE_MODE=false", "SERVER_PORT=25598",
 		// -Xlog:gc rather than JFR: the pause distribution is all the sweep
@@ -101,6 +117,9 @@ func Env(p Profile, cfg *Config, w Workload, xx []string) []string {
 	// without it there is no tick measurement for the workloads that matter
 	// most, and its overhead is constant across profiles, so comparisons stay
 	// valid.
+	if loader != "" {
+		env = append(env, "FABRIC_LOADER_VERSION="+loader)
+	}
 	sp := SpecFor(w)
 	if sp.Pack {
 		env = append(env, "PACKWIZ_URL="+PackURL)
@@ -149,7 +168,7 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, par P
 	_ = c.Remove(name)
 	defer func() { _ = c.Remove(name) }()
 
-	if err := c.Start(name, p.Image, Env(p, cfg, w, xx)); err != nil {
+	if err := c.Start(name, p.Image, Env(p, cfg, w, xx, par)); err != nil {
 		return Run{}, fmt.Errorf("starting %s: %w", name, err)
 	}
 	rc, err := c.Logs(name)

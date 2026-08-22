@@ -22,6 +22,7 @@ func Render(results []Result, host string, when time.Time) string {
 	fmt.Fprintf(&b, "- anything under %.0f%% is noise on a shared VM and is shown as `~`\n\n",
 		NoiseFloor*100)
 	writeHardware(&b, results)
+	provenance(&b, results)
 	b.WriteString("\n")
 
 	for _, w := range AllWorkloads {
@@ -69,9 +70,9 @@ func Render(results []Result, host string, when time.Time) string {
 					r.Profile, r.Heap)
 				continue
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %.1fms | %.1f | %s | %.0f%% | %.1fs | %.1fms | %.1fms |\n",
+			fmt.Fprintf(&b, "| `%s` | %s | %s | %s | %.1fms | %s | %s | %.0f%% | %.1fs | %.1fms | %.1fms |\n",
 				r.Profile, r.Heap, throughput(sp, r), delta(base, sp.Metric.Of(r), sp.Metric),
-				r.MSPTP95(), r.TPS(),
+				r.MSPTP95(), tps(r.TPS()),
 				humanBytes(r.PeakRSS()), r.PeakCPU(), r.Startup(),
 				r.GCPause(95), r.GCPause(99))
 		}
@@ -229,6 +230,17 @@ func repeatSummary(rs []Result) string {
 			n = len(r.Runs)
 		}
 	}
+	// Say how many were ASKED for when that differs, so a sweep where runs
+	// crashed cannot read as a deliberately short one.
+	want := 0
+	for _, r := range rs {
+		if r.Attempted > want {
+			want = r.Attempted
+		}
+	}
+	if want > n {
+		return fmt.Sprintf("%d of %d runs per profile; some did not finish", n, want)
+	}
 	if n == 1 {
 		return "1 run per profile"
 	}
@@ -279,5 +291,55 @@ func writeHardware(b *strings.Builder, results []Result) {
 		for _, h := range hw {
 			fmt.Fprintf(b, "  - %s\n", h)
 		}
+	}
+}
+
+// TPSCeiling is the tick rate a healthy server holds. At the ceiling the number
+// carries no information: every profile reads 20 and the column says nothing.
+// Below it, it is the most important number on the page.
+const TPSCeiling = 20.0
+
+// tps renders a tick rate at a resolution that can show a deficit.
+//
+// One decimal place rounded the explore workload's 19.97 to "20.0", identical
+// to the two workloads that never left the ceiling - hiding the only reading
+// this project has produced where the server could not keep up.
+func tps(v float64) string {
+	switch {
+	case v <= 0:
+		return "-"
+	case v >= TPSCeiling-0.005:
+		return "20"
+	}
+	return fmt.Sprintf("**%.2f**", v)
+}
+
+// provenance is the block that says what was measured, above the tables.
+//
+// The Markdown is the file a human reads, and it carried less than its JSON
+// twin: no seed, no commit, no radius, no load, no pack. A reader could not
+// answer "which pack?" or "which Java?" from the artifact they were reviewing.
+func provenance(b *strings.Builder, rs []Result) {
+	if pk := firstPack(rs); pk.Known() {
+		fmt.Fprintf(b, "- pack: %s\n", pk)
+		if pk.Minecraft != "" {
+			fmt.Fprintf(b, "- minecraft %s, fabric loader %s\n", pk.Minecraft, pk.Fabric)
+		}
+	}
+	for _, r := range rs {
+		if r.Java != "" {
+			fmt.Fprintf(b, "- java: %s\n", r.Java)
+			break
+		}
+	}
+	if c := firstCommit(rs); c != "" {
+		fmt.Fprintf(b, "- harness commit: `%s`\n", c)
+	}
+	fmt.Fprintf(b, "- seed: `%s`\n", BenchSeed)
+	if n := firstRadius(rs); n > 0 {
+		fmt.Fprintf(b, "- pregen radius: %d blocks\n", n)
+	}
+	if l := firstLoad(rs); l > 0 {
+		fmt.Fprintf(b, "- tick load: %gx\n", l)
 	}
 }

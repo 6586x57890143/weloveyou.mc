@@ -24,6 +24,7 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 		NoiseFloorPct: NoiseFloor,
 		Seed:          BenchSeed,
 		Commit:        firstCommit(results),
+		Pack:          firstPack(results),
 		Radius:        firstRadius(results),
 		Load:          firstLoad(results),
 		Workloads:     map[string]jsonWorkload{},
@@ -62,6 +63,10 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 				StartupSec:   r.Startup(),
 				GCPauseP99Ms: r.GCPause(99),
 				Repeats:      len(r.Runs),
+				Attempted:    r.Attempted,
+				Image:        r.Image,
+				Java:         r.Java,
+				JVMArgs:      r.JVMArgs,
 				Dropped:      r.Dropped,
 			})
 		}
@@ -77,6 +82,7 @@ type jsonDoc struct {
 	Repeats       int                     `json:"repeats_per_profile"`
 	NoiseFloorPct float64                 `json:"noise_floor"`
 	Commit        string                  `json:"commit,omitempty"`
+	Pack          Pack                    `json:"pack,omitempty"`
 	Seed          string                  `json:"seed"`
 	Radius        int                     `json:"radius,omitempty"`
 	Load          float64                 `json:"load,omitempty"`
@@ -121,8 +127,15 @@ type jsonRow struct {
 	PeakRSSBytes float64  `json:"peak_rss_bytes"`
 	StartupSec   float64  `json:"startup_sec"`
 	GCPauseP99Ms float64  `json:"gc_pause_p99_ms"`
-	Repeats      int      `json:"repeats"`
-	Dropped      []string `json:"dropped_flags,omitempty"`
+	// Repeats is how many runs FINISHED; Attempted how many were asked for.
+	// Publishing only the first made a row where two of three crashed look
+	// like a deliberate single run.
+	Repeats   int      `json:"repeats"`
+	Attempted int      `json:"attempted,omitempty"`
+	Image     string   `json:"image,omitempty"`
+	Java      string   `json:"java,omitempty"`
+	JVMArgs   []string `json:"jvm_args,omitempty"`
+	Dropped   []string `json:"dropped_flags,omitempty"`
 }
 
 // maxRepeats reports the largest repeat count any profile achieved. A run that
@@ -165,4 +178,16 @@ func firstLoad(rs []Result) float64 {
 		}
 	}
 	return 0
+}
+
+// firstPack is the pack the sweep resolved. Every shard of one sweep resolves
+// it once, so any non-empty one describes the whole sweep - and if they
+// disagree, the validator is what catches it.
+func firstPack(rs []Result) Pack {
+	for _, r := range rs {
+		if r.Pack.Known() {
+			return r.Pack
+		}
+	}
+	return Pack{}
 }
