@@ -309,3 +309,41 @@ func TestAProfileThatNeverRanIsNotAScore(t *testing.T) {
 		t.Error("the JSON does not mark the failed row")
 	}
 }
+
+func TestTheRunRecordsWhatWouldChangeItsNumbers(t *testing.T) {
+	// Commit, radius and load all move the numbers, so they travel with them.
+	// A workflow log carries the same facts and ages out after three days,
+	// by which point the committed file is the only record left.
+	rs := []Result{
+		{Profile: "a", Workload: WorkloadPack},
+		{Profile: Baseline, Workload: WorkloadPack, Commit: "abc123def456789", Radius: 400,
+			Load: 1.5, Runs: []Run{{Chunks: 10, Elapsed: time.Second}}},
+	}
+	doc, err := RenderJSON(rs, "h", time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"commit": "abc123def456789"`,
+		`"radius": 400`,
+		`"load": 1.5`,
+		`"seed": "` + BenchSeed + `"`,
+	} {
+		if !strings.Contains(string(doc), want) {
+			t.Errorf("the JSON is missing %s:\n%s", want, doc)
+		}
+	}
+
+	// A sweep from before these were recorded must still render, with the
+	// fields simply absent rather than zeroed into something that looks real.
+	bare, err := RenderJSON([]Result{{Profile: Baseline, Workload: WorkloadPack,
+		Runs: []Run{{Chunks: 1, Elapsed: time.Second}}}}, "h", time.Unix(0, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{`"commit"`, `"radius"`, `"load"`} {
+		if strings.Contains(string(bare), absent) {
+			t.Errorf("%s should be omitted when unrecorded:\n%s", absent, bare)
+		}
+	}
+}
