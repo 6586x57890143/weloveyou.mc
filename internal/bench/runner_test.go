@@ -16,6 +16,7 @@ type fakeDocker struct {
 	mem        string
 	memErr     error
 	execs      []string
+	statCalls  int
 	removes    int
 	startedEnv []string
 }
@@ -188,5 +189,32 @@ func TestDefaultTimeoutsArePositive(t *testing.T) {
 	to := DefaultTimeouts()
 	if to.Boot <= 0 || to.Generate <= 0 || to.Sample <= 0 {
 		t.Errorf("DefaultTimeouts() = %+v", to)
+	}
+}
+
+func TestExecuteSamplesOnAClockNotPerLogLine(t *testing.T) {
+	// The sampling block used to sit unguarded inside the log loop, so
+	// `docker stats --no-stream` (a second or two each) and `spark tps` ran for
+	// every line the server printed. Each spark reply is about ten more lines,
+	// each of which triggered another sample: a feedback loop that turned a
+	// seven minute run into forty-five and reported ~1.0 chunks/s for every
+	// profile. Timeouts.Sample existed the whole time and was never read.
+	p, cfg := testProfile()
+	f := &fakeDocker{log: happyLog, mem: "50.00%\t2.5GiB / 11.6GiB"}
+
+	// A clock that never advances: no sample interval can ever elapse, so
+	// after the first sample there must be no more.
+	frozen := func() time.Time { return time.Unix(0, 0) }
+	if _, err := Execute(f, p, cfg, WorkloadPack, nil, 500, frozen, DefaultTimeouts()); err != nil {
+		t.Fatalf("Execute() = %v", err)
+	}
+	lines := strings.Count(strings.TrimSpace(happyLog), "\n") + 1
+	if f.statCalls > 1 {
+		t.Errorf("sampled %d times with a frozen clock, want at most 1 (log had %d lines)",
+			f.statCalls, lines)
+	}
+	if f.statCalls >= lines {
+		t.Errorf("sampled once per log line (%d/%d): the interval is not being honoured",
+			f.statCalls, lines)
 	}
 }
