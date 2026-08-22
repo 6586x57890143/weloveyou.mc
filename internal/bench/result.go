@@ -39,7 +39,13 @@ type Result struct {
 	// field, which is why the renderers fall back rather than insist.
 	Host     string
 	Hardware Hardware // the machine this was measured on; shards may differ
-	Heap     string   // the heap it ran with, so a row is self-describing
+	// Commit is the source the sweep was built from, and Radius and Load the
+	// settings it ran with. All three change the numbers, so they travel with
+	// them rather than living in a workflow log that ages out in three days.
+	Commit   string
+	Radius   int
+	Load     float64
+	Heap     string // the heap it ran with, so a row is self-describing
 	Workload Workload
 	Runs     []Run
 	Dropped  []string // flags the JVM refused during preflight

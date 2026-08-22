@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"weloveyou-mc/internal/bench"
+	"weloveyou-mc/internal/buildinfo"
 )
 
 // benchCmd runs the JVM flag sweep.
@@ -124,7 +125,8 @@ func benchCmd(args []string, out io.Writer) error {
 			// render time named the ubuntu-latest merge runner instead of the
 			// three Ampere boxes that produced the numbers.
 			res := bench.Result{Profile: p.Name, Host: host, Hardware: hw,
-				Heap: p.Heap(), Workload: w, Dropped: dropped}
+				Heap: p.Heap(), Workload: w, Dropped: dropped,
+				Commit: buildinfo.Commit(), Radius: par.Radius, Load: par.Load}
 			if *dry {
 				results = append(results, res)
 				continue

@@ -22,6 +22,10 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 		Generated:     when.UTC().Format(time.RFC3339),
 		Repeats:       maxRepeats(results),
 		NoiseFloorPct: NoiseFloor,
+		Seed:          BenchSeed,
+		Commit:        firstCommit(results),
+		Radius:        firstRadius(results),
+		Load:          firstLoad(results),
 		Workloads:     map[string]jsonWorkload{},
 	}
 	for _, w := range AllWorkloads {
@@ -72,6 +76,10 @@ type jsonDoc struct {
 	Generated     string                  `json:"generated"`
 	Repeats       int                     `json:"repeats_per_profile"`
 	NoiseFloorPct float64                 `json:"noise_floor"`
+	Commit        string                  `json:"commit,omitempty"`
+	Seed          string                  `json:"seed"`
+	Radius        int                     `json:"radius,omitempty"`
+	Load          float64                 `json:"load,omitempty"`
 	Workloads     map[string]jsonWorkload `json:"workloads"`
 	// Order is the render order. A JSON object is unordered and Go marshals map
 	// keys alphabetically, so without this the site listed workload E before
@@ -128,4 +136,33 @@ func maxRepeats(results []Result) int {
 		}
 	}
 	return n
+}
+
+// The settings a sweep ran with, read off the results rather than threaded
+// through every renderer. Every shard of one sweep carries the same values.
+func firstCommit(rs []Result) string {
+	for _, r := range rs {
+		if r.Commit != "" {
+			return r.Commit
+		}
+	}
+	return ""
+}
+
+func firstRadius(rs []Result) int {
+	for _, r := range rs {
+		if r.Radius > 0 {
+			return r.Radius
+		}
+	}
+	return 0
+}
+
+func firstLoad(rs []Result) float64 {
+	for _, r := range rs {
+		if r.Load > 0 {
+			return r.Load
+		}
+	}
+	return 0
 }
