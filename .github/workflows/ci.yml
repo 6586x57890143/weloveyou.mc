@@ -70,6 +70,17 @@ jobs:
           pip -q install pyyaml
           python scripts/check-runners.py
 
+      # Nothing else runs the site generator until pages.yml runs it on main,
+      # so a syntax error or a crash in it used to surface as a red DEPLOY,
+      # after the merge that was supposed to publish the numbers. Rendering the
+      # committed screening data here catches it while it is still a PR.
+      - name: the site generator must render the committed results
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/bench-site.py --out "$RUNNER_TEMP/site"
+          test -s "$RUNNER_TEMP/site/index.html"
+
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest
