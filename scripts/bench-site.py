@@ -351,7 +351,12 @@ def workload_table(key, wl, parts):
         '<div class="wrap"><table><thead><tr>'
         "<th>#</th><th></th><th>profile</th><th>heap</th>"
         f"<th>{html.escape(metric)}</th><th></th><th>vs base</th>"
-        "<th>MSPT p95</th><th>TPS</th><th>RSS</th><th>CPU</th>"
+        # MSPT median beside whichever percentile the workload is read by. On a
+        # tick workload the primary column is already p95, so repeating it here
+        # was one column saying the same thing twice; the median is the half
+        # that says whether a collector stalls routinely or only rarely, and it
+        # was in the JSON but displayed nowhere.
+        "<th>MSPT med</th><th>TPS</th><th>RSS</th><th>CPU</th>"
         "<th>boot</th><th>GC95</th><th>GC99</th>"
         "</tr></thead><tbody>"
     )
@@ -381,7 +386,7 @@ def workload_table(key, wl, parts):
             + cell(f"{value:.1f}")
             + cell(bar(1.0 - frac if lower else frac), f"bar {cls}")
             + cell(html.escape(row.get("vs_baseline") or EMPTY), cls)
-            + cell(num(row.get("mspt_p95_ms"), ".1f", "ms"))
+            + cell(num(row.get("mspt_median_ms"), ".1f", "ms"))
             + cell(num(row.get("tps"), ".1f"))
             + cell(human_bytes(row.get("peak_rss_bytes")))
             + cell(num(row.get("peak_cpu_percent"), ".0f", "%"))
