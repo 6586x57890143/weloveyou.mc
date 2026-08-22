@@ -121,6 +121,8 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 	defer rc.Close()
 
 	sc := NewScanner(now)
+	// Zero value means the first sample fires immediately once the server is up.
+	var lastSample time.Time
 	lines := bufio.NewScanner(rc)
 	lines.Buffer(make([]byte, 1<<20), 1<<20)
 
@@ -134,10 +136,18 @@ func Execute(c Container, p Profile, cfg *Config, w Workload, xx []string, radiu
 			sc.StartGeneration()
 			_ = c.Exec(name, "rcon-cli", "chunky start")
 		}
-		if sc.Ready() {
-			// Ask spark for tick numbers on the same cadence as the resource
-			// sample. It replies into the log asynchronously, so the scanner
-			// picks it up on a later line and the newest reading wins.
+		// Sample on a clock, not per log line. Both calls below are expensive
+		// (`docker stats --no-stream` alone takes a second or two) and this
+		// block used to run for EVERY line the server printed. Worse, each
+		// `spark tps` reply is about ten more log lines, each of which
+		// triggered another sample: a feedback loop that dragged a seven minute
+		// run out to forty-five and reported ~1.0 chunks/s for every profile in
+		// a sweep that then took seven hours. Timeouts.Sample existed the whole
+		// time and was simply never read.
+		if sc.Ready() && now().Sub(lastSample) >= to.Sample {
+			lastSample = now()
+			// spark answers into the log asynchronously, so the scanner picks
+			// the reply up on a later line and the newest reading wins.
 			_ = c.Exec(name, "rcon-cli", "spark tps")
 			if line, err := c.Stats(name); err == nil {
 				rss, _ := ParseMemUsage(statsField(line, 1))

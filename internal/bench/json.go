@@ -39,6 +39,9 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 				ChunksPerSec: cps,
 				PeakCPUPct:   r.PeakCPU(),
 				GCPauseP95Ms: r.GCPause(95),
+				MSPTMedianMs: r.MSPTMed(),
+				MSPTP95Ms:    r.MSPTP95(),
+				TPS:          r.TPS(),
 				VsBaseline:   delta(base, cps),
 				PeakRSSBytes: r.PeakRSS(),
 				StartupSec:   r.Startup(),
@@ -71,6 +74,9 @@ type jsonRow struct {
 	Heap         string   `json:"heap,omitempty"`
 	PeakCPUPct   float64  `json:"peak_cpu_percent"`
 	GCPauseP95Ms float64  `json:"gc_pause_p95_ms"`
+	MSPTMedianMs float64  `json:"mspt_median_ms"`
+	MSPTP95Ms    float64  `json:"mspt_p95_ms"`
+	TPS          float64  `json:"tps"`
 	ChunksPerSec float64  `json:"chunks_per_sec"`
 	VsBaseline   string   `json:"vs_baseline"`
 	PeakRSSBytes float64  `json:"peak_rss_bytes"`

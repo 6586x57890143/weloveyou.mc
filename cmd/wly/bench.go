@@ -95,6 +95,17 @@ func benchCmd(args []string, out io.Writer) error {
 			}
 			results = append(results, res)
 		}
+		// Flush after every profile rather than only at the end. A sweep that
+		// dies partway used to lose everything: the last one ran seven hours,
+		// completed nine runs, and was killed by the idle timer with nothing on
+		// disk to show for it. Writing as we go turns that into nine usable
+		// rows. A write error here is reported but not fatal, since losing the
+		// remaining profiles to a transient failure would be the worse outcome.
+		if !*dry {
+			if err := writeReports(results, host, *outPath, *jsonPath); err != nil {
+				fmt.Fprintf(out, "  warning: %v\n", err)
+			}
+		}
 	}
 
 	if *dry {
@@ -102,26 +113,10 @@ func benchCmd(args []string, out io.Writer) error {
 		return nil
 	}
 
-	report := bench.Render(results, host, time.Now())
-	if err := os.WriteFile(*outPath, []byte(report), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", *outPath, err)
+	if err := writeReports(results, host, *outPath, *jsonPath); err != nil {
+		return err
 	}
 	fmt.Fprintf(out, "\nwrote %s\n", filepath.Base(*outPath))
-
-	// The machine-readable twin, for the published site. The two useful moments
-	// are separated in time, results exist only during the sweep, but
-	// publishing waits until a human has read the numbers and merged them, so
-	// the data is committed alongside the prose rather than re-parsed out of it.
-	if *jsonPath != "" {
-		doc, err := bench.RenderJSON(results, host, time.Now())
-		if err != nil {
-			return fmt.Errorf("rendering json: %w", err)
-		}
-		if err := os.WriteFile(*jsonPath, append(doc, '\n'), 0o644); err != nil {
-			return fmt.Errorf("writing %s: %w", *jsonPath, err)
-		}
-		fmt.Fprintf(out, "wrote %s\n", filepath.Base(*jsonPath))
-	}
 
 	// A sweep where every run failed still writes a report, and used to exit 0
 	// with it, so the workflow went green having measured nothing. Twelve
@@ -151,6 +146,30 @@ func dockerProbe(image string, flags []string) error {
 		if strings.Contains(string(outp), bad) {
 			return fmt.Errorf("%s", bad)
 		}
+	}
+	return nil
+}
+
+// writeReports renders both the human table and its machine-readable twin.
+//
+// The two exist because the useful moments are separated in time: results live
+// only while the sweep is running, but publishing waits until someone has read
+// the numbers and merged them, so the data gets committed rather than re-parsed
+// out of the prose later.
+func writeReports(results []bench.Result, host, outPath, jsonPath string) error {
+	now := time.Now()
+	if err := os.WriteFile(outPath, []byte(bench.Render(results, host, now)), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", outPath, err)
+	}
+	if jsonPath == "" {
+		return nil
+	}
+	doc, err := bench.RenderJSON(results, host, now)
+	if err != nil {
+		return fmt.Errorf("rendering json: %w", err)
+	}
+	if err := os.WriteFile(jsonPath, append(doc, '\n'), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", jsonPath, err)
 	}
 	return nil
 }

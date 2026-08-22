@@ -1,7 +1,7 @@
 # Handoff 💖
 
 Notes for whoever picks this up next, including future me. Current as of
-**v0.2.0**, *last swept 2026-08-19*. If anything here disagrees with reality,
+**v0.2.0**, *last swept 2026-08-22*. If anything here disagrees with reality,
 reality wins and this file is stale, so check the live state with the commands
 below before believing it.
 
@@ -13,7 +13,8 @@ the line deletes the reason too. See **Keeping these docs honest** in
 ## What exists right now
 
 A joinable modded Minecraft server, a pack that publishes itself, and a
-benchmark harness that has finally started producing numbers.
+benchmark harness that still has not produced a full table, for reasons
+now understood and fixed.
 
 | Thing | Where | State |
 |---|---|---|
@@ -126,6 +127,60 @@ gh workflow run bench -R 6586x57890143/weloveyou.mc -f workload=both -f runs=3
 ```
 
 Expect ZGC to lose: it costs 10-15% CPU and there are two cores.
+
+## Where things actually stand, 2026-08-22
+
+The sweep has still never produced a usable table, and the reasons are now known
+and fixed rather than suspected.
+
+**The 7-hour sweep was our bug, not the hardware.** It ran 7h11m, finished 9 of
+42 runs, reported ~1.0 chunks/s for everything, and saved nothing.
+`Timeouts.Sample` was declared and never read, so `docker stats --no-stream`
+(1-2s each) and `rcon-cli spark tps` ran for *every log line*. Each spark reply
+is ten more lines, each triggering another sample, so it compounded. The same box
+did 8.1-8.4 chunks/s before spark landed. Any conclusion about ARM being too slow
+came from those broken numbers, so it should be re-formed after a clean run.
+
+**The idle timer killed it.** `wly-bench-idle.timer` on the production box fires
+at 23:30 UTC to stop a box left running by a crashed sweep; it stopped a healthy
+one. A busy-aware replacement is installed on the bench box itself (only that box
+can see whether a job is running) via `bench-admin.yml -> self-stop`. The old
+production-side timer should be disabled once the new one is confirmed.
+
+**The bench box drops off the tailnet on every reboot.** The `TS_AUTHKEY` is
+ephemeral, so the node is deleted when it goes offline. Re-run
+`bench-admin.yml -> tailscale-up` after each boot, or use the workflow actions
+instead of SSH.
+
+**The live server was three days stale.** It ran the old 17-entry pack (87 mods)
+while v0.1.5 with 72 entries was published, because a pack release only takes
+effect on restart and nothing restarts it. Restarted 2026-08-22: now
+`Loading 143 mods`, healthy. This is the gap `wly serve` is meant to close.
+
+**The client Java guard had been switched off.** `deps-check.py` was set to
+`client: 25` while the Prism instance pinned no JRE, so stock installs still got
+21. That is the C2ME bug class the check exists to catch. Fixed by pinning a java
+component in `mmc-pack.json` (`weloveyou-pack#4`).
+
+### Open PRs
+
+- `weloveyou.mc#10` sampling fix, incremental writes, TPS into JSON, self-stop action
+- `weloveyou-pack#4` pin Java 25 in the instance
+
+### What the benchmark still needs
+
+- **Simulated players.** Worldgen is throughput-bound, so TPS reads ~20 on every
+  profile and says nothing. TPS and MSPT p95 are wired end to end (spark, with
+  `-Dspark.backgroundProfiler=false`, otherwise it segfaults on Java 25/aarch64),
+  but they only become meaningful under a workload C that puts real tick load on
+  the server. This is the missing piece, not the metric.
+- **A re-run before any hardware decision.** Fix is in, so a clean sweep is cheap.
+  If honest numbers are still poor: bigger A1 or an x86 box first (credits expire
+  15 September and a sweep costs well under EUR 1), then the local-PC pivot behind
+  the Oracle VPS. If production hardware moves, the bench box has to move with it
+  or the numbers describe a machine nobody uses.
+- **The pack tripled.** 17 entries to 72, 143 mods loaded. Re-check `radius` and
+  the profile count so a full sweep fits comfortably inside one night.
 
 ## What is next
 
