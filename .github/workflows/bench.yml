@@ -26,7 +26,17 @@ on:
         # These must be the strings ParseWorkloads accepts, not the A/B labels:
         # the options used to read [a, b, both], so picking anything but the
         # default failed the sweep on the first command with "unknown workload".
-        options: [both, vanilla, pack]
+        #
+        # `both` and `worldgen` are the two chunk-throughput workloads.
+        # `players` is the tick load: carpet fake players exploring, a villager
+        # population, and a powered Oritech machine array. Those are what make
+        # MSPT mean anything - worldgen barely ticks entities, so TPS reads 20
+        # on every profile and the suite cannot see a tick-bound regression.
+        #
+        # They are also the expensive ones: a fixed 8 minutes of steady state
+        # plus warmup each, so run them against the handful of profiles
+        # screening liked rather than the whole matrix. `only` takes a list.
+        options: [both, worldgen, vanilla, pack, players, explore, village, machines, all]
       runs:
         description: "Repeats per profile, medians are reported, not single runs"
         required: false
@@ -46,9 +56,17 @@ on:
         required: false
         default: "1000"
       only:
-        description: "Run a single profile by name (blank = all enabled)"
+        description: "Comma-separated profiles to run (blank = all enabled)"
         required: false
         default: ""
+      # The calibration knob. A tick workload whose load cannot move MSPT p95 is
+      # not measuring anything, and how much load this box needs is a property
+      # of the box. Raise it until p95 clears the idle floor on the baseline
+      # profile, then leave it alone so later rows stay comparable.
+      load:
+        description: "Scale the tick workloads' entity and machine counts"
+        required: false
+        default: "1"
       out:
         description: "Output file, use BENCHMARKS-screening.md for a screening pass"
         required: false
@@ -110,6 +128,7 @@ jobs:
             --workload "${{ github.event.inputs.workload || 'both' }}" \
             --runs "${{ github.event.inputs.runs || '3' }}" \
             --radius "${{ github.event.inputs.radius || '1000' }}" \
+            --load "${{ github.event.inputs.load || '1' }}" \
             --only "${{ github.event.inputs.only || '' }}" \
             --out "$OUT" \
             --json "${OUT%.md}.json" \

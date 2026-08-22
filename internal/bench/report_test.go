@@ -65,16 +65,22 @@ func TestDeltaHidesNoise(t *testing.T) {
 func TestDeltaFunction(t *testing.T) {
 	tests := []struct {
 		base, v float64
+		m       Metric
 		want    string
 	}{
-		{100, 120, "+20.0%"},
-		{100, 80, "-20.0%"},
-		{100, 101, "~"},
-		{0, 50, "-"},
+		{100, 120, chunkThroughput, "+20.0%"},
+		{100, 80, chunkThroughput, "-20.0%"},
+		{100, 101, chunkThroughput, "~"},
+		{0, 50, chunkThroughput, "-"},
+		// A lower-is-better metric flips the sign, so a positive number means
+		// "better" in every column of the report rather than only in some.
+		{100, 120, tickHealth, "-20.0%"},
+		{100, 80, tickHealth, "+20.0%"},
+		{100, 101, tickHealth, "~"},
 	}
 	for _, tt := range tests {
-		if got := delta(tt.base, tt.v); got != tt.want {
-			t.Errorf("delta(%v,%v) = %q, want %q", tt.base, tt.v, got, tt.want)
+		if got := delta(tt.base, tt.v, tt.m); got != tt.want {
+			t.Errorf("delta(%v,%v,%q) = %q, want %q", tt.base, tt.v, tt.m.Label, got, tt.want)
 		}
 	}
 }
@@ -134,10 +140,10 @@ func TestBaselineOfFallsBackToFirstRow(t *testing.T) {
 	// A sweep that excluded the baseline still needs something to compare to,
 	// and reporting nothing would be worse than reporting relative to row one.
 	rs := []Result{{Profile: "a", Workload: WorkloadPack, Runs: []Run{run(100, 10, 1e9)}}}
-	if got := baselineOf(rs); got != 10 {
+	if got := baselineOf(rs, chunkThroughput); got != 10 {
 		t.Errorf("baselineOf = %v, want 10", got)
 	}
-	if got := baselineOf(nil); got != 0 {
+	if got := baselineOf(nil, chunkThroughput); got != 0 {
 		t.Errorf("baselineOf(nil) = %v, want 0", got)
 	}
 }

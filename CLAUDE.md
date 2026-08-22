@@ -25,7 +25,7 @@ Two Go binaries and one Cloudflare Worker. Plan lives at
 Cloudflare Pages. Phase 2 (the Discord design passes) got pushed back in favour of the
 pack development loop, which now lives in `weloveyou-pack` as `scripts/pack-dev.sh`.
 
-*Last swept 2026-08-19.* See **Keeping these docs honest** at the end.
+*Last swept 2026-08-22.* See **Keeping these docs honest** at the end.
 
 ## Commands
 
@@ -289,13 +289,86 @@ Two rules that are easy to get wrong:
    perf mods; gameplay mods are still to come. A workload-B number is only comparable to
    another taken against a similar pack, so the report prints the mod count it measured and
    says so. Do not compare a row from today against one taken after the pack doubles.
-6. **The sweep is two passes.** 18 profiles at full radius and 3 repeats is roughly 50 hours
-   of a box that bills by the hour. Screen the whole matrix at `--runs 1 --radius 500` into
-   `BENCHMARKS-screening.md`, then confirm the top few at full depth into `BENCHMARKS.md`.
+6. **The sweep is three passes.** 25 profiles at full radius and 3 repeats is roughly 50
+   hours of a box that bills by the hour. Screen the whole matrix at `--runs 1 --radius 500`
+   into `BENCHMARKS-screening.md`, then confirm the top few at full depth into
+   `BENCHMARKS.md`, then run the tick workloads against only those.
    A screening run has no variance to report, so the two files are never comparable.
+
+   ```bash
+   gh workflow run bench -f workload=worldgen -f runs=1 -f radius=400 -f out=BENCHMARKS-screening.md
+   gh workflow run bench -f workload=worldgen -f runs=3 -f radius=1000 -f only=j25-g1-coh,baseline-j21
+   gh workflow run bench -f workload=players  -f runs=3 -f only=j25-g1-coh,baseline-j21
+   ```
+
+7. **The tick workloads are read by MSPT p95, never TPS.** TPS is capped at 20, so a load
+   that is merely heavy reads 20 on every profile and reproduces the blind spot the
+   workloads exist to remove: worldgen barely ticks entities, so the instrument was wired
+   end to end for weeks while measuring nothing. p95 is unbounded and moves long before
+   TPS does. `explore`, `village` and `machines` all report it, lower being better, and
+   `vs base` is signed accordingly so a positive number means "better" in every column.
+
+8. **A tick workload must be calibrated before it is believed.** One whose load cannot move
+   p95 measures nothing while still printing a plausible row, which is the same failure as
+   a JVM flag the JVM accepts and then ignores. Run
+   `--only baseline-j21 --workload players --runs 1` and raise `--load` until p95 clears the
+   idle floor, then leave it there: two rows taken at different `--load` are not comparable.
+   Record the calibrated value in `jvm-profiles.toml` next to the other method notes.
+
+9. **`--dry-run` prints each workload's RCON script and needs no docker.** That is the cheap
+   proof a drive script is well-formed. The expensive alternative is finding out on a box
+   that bills by the hour, from a log where a rejected command is one grey line among
+   thousands.
+
+   ```bash
+   go run ./cmd/wly bench --dry-run --workload all
+   ```
 
 `jvm-profiles.toml` holds the candidates. Nothing in it is believed until it has a row in
 `BENCHMARKS.md`.
+
+**A workload is a row in `Specs` (`internal/bench/workload.go`)**, not a branch: what to
+load, what to type once the server is up, what to type on each sample tick, when to stop,
+and which number the table is read by. `Render`, `RenderJSON` and `scripts/bench-site.py`
+all iterate `AllWorkloads`, so adding one is a row and forgetting one is a test failure
+rather than a workload that silently renders nowhere.
+
+**Carpet is an instrument, not content.** It supplies the fake players and is pinned in
+`runner.go` beside spark and Chunky, loaded through `MODS=`. It is deliberately absent from
+`pack/stable`: a fake-player mod has no business shipping to players, and the pack's
+`side` checking has enough to worry about.
+
+## The benchmark site
+
+`scripts/bench-site.py` renders `BENCHMARKS.json` and `BENCHMARKS-screening.json`
+into one self-contained page, published by `pages.yml` to Workers Static Assets
+(`wrangler.jsonc`) on a **merge to main**, never off a sweep finishing.
+
+**Design identity, so the next page in this project matches rather than guesses:**
+minimal, monospace, dark, extended-ASCII, Minecraft-inspired. The accents are
+Minecraft's own chat palette desaturated for reading on a dark background, and
+the mapping is written into the file next to the CSS: `§a` win, `§c` loss and
+failure, `§6` baseline and warnings, `§b` links, `§7` secondary.
+
+**Box-drawing glyphs go where monospace alignment is safe and carries meaning**:
+the header frame, the rules, the bars (`█▉▊▋▌▍▎▏`), the row markers. **Table grid
+lines are CSS borders, not drawn characters.** A real `+--+--+` grid breaks the
+moment a cell wraps or the viewport narrows, and a table that only lines up at
+one width is worse than one that never pretended to. Where a rule has to span an
+arbitrary width, it is a repeated glyph clipped by `overflow:hidden` between two
+real corner characters, which fits any width exactly.
+
+Two rules learned from publishing the first real sweep:
+
+- **One glyph means "no value".** There were three, because `a08b9f8` swapped em
+  dashes for plain punctuation and turned the placeholders into a literal `", "`.
+- **The page states how each table reads.** Throughput is higher-is-better and
+  tick health is lower-is-better, so `vs base` is signed to make positive always
+  mean better, and each table says which metric it is read by.
+
+`ci.yml` renders the committed results on every PR. Before that, nothing ran the
+generator until `pages.yml` ran it on `main`, so a crash in it surfaced as a red
+deploy after the merge that was meant to publish the numbers.
 
 `wly bench` preflights every flag with `java <flags> -version` and drops what the JVM
 rejects, so a flag removed by a future JDK degrades instead of failing the boot. It probes

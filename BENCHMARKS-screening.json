@@ -1,15 +1,19 @@
 {
-  "host": "runnervm76f27",
-  "generated": "2026-08-22T12:08:11Z",
+  "host": "unrecorded",
+  "generated": "2026-08-22T14:44:38Z",
   "repeats_per_profile": 1,
   "noise_floor": 0.05,
   "workloads": {
     "pack": {
       "title": "Workload B - the pack we actually ship",
       "mods_loaded": 142,
+      "primary_metric": "chunks/s",
+      "primary_lower_is_better": false,
+      "worldgen": true,
       "rows": [
         {
           "profile": "baseline-j21",
+          "primary_value": 9.718254922578337,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -33,6 +37,7 @@
         },
         {
           "profile": "j21-g1-bruce",
+          "primary_value": 9.317801707576717,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -56,6 +61,7 @@
         },
         {
           "profile": "j21-graalvm-g1-bruce",
+          "primary_value": 9.930804454301546,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -79,6 +85,7 @@
         },
         {
           "profile": "j21-graalvm-parallel",
+          "primary_value": 9.781232589240055,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -102,6 +109,7 @@
         },
         {
           "profile": "j21-graalvm-serial",
+          "primary_value": 9.749533439833112,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -125,6 +133,7 @@
         },
         {
           "profile": "j21-parallel",
+          "primary_value": 9.362284923255363,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -148,6 +157,7 @@
         },
         {
           "profile": "j21-serial",
+          "primary_value": 9.064626924583253,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -171,6 +181,7 @@
         },
         {
           "profile": "j21-wly-g1",
+          "primary_value": 9.369711085559693,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -197,6 +208,7 @@
         },
         {
           "profile": "j21-zgc",
+          "primary_value": 7.978223310754279,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -220,6 +232,7 @@
         },
         {
           "profile": "j25-g1",
+          "primary_value": 9.56585670912897,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -243,6 +256,7 @@
         },
         {
           "profile": "j25-g1-bruce-coh",
+          "primary_value": 9.596615914395134,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -266,6 +280,7 @@
         },
         {
           "profile": "j25-g1-coh",
+          "primary_value": 9.45628224629059,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -289,6 +304,7 @@
         },
         {
           "profile": "j25-g1-coh-10g",
+          "primary_value": 9.845341978517148,
           "heap": "10G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -312,6 +328,7 @@
         },
         {
           "profile": "j25-g1-coh-4g",
+          "primary_value": 9.616532511666568,
           "heap": "4G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -335,6 +352,7 @@
         },
         {
           "profile": "j25-g1-coh-8g",
+          "primary_value": 9.5011463322945,
           "heap": "8G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -358,6 +376,7 @@
         },
         {
           "profile": "j25-graalvm-g1-bruce-coh",
+          "primary_value": 9.549586276096516,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -381,6 +400,7 @@
         },
         {
           "profile": "j25-graalvm-g1-coh",
+          "primary_value": 9.728636325736504,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -404,6 +424,7 @@
         },
         {
           "profile": "j25-graalvm-parallel-coh",
+          "primary_value": 9.753341385103756,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -427,6 +448,7 @@
         },
         {
           "profile": "j25-parallel-coh",
+          "primary_value": 9.557398815860212,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -450,6 +472,7 @@
         },
         {
           "profile": "j25-serial-coh",
+          "primary_value": 9.294799069751152,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -473,6 +496,8 @@
         },
         {
           "profile": "j25-shenandoah-gen",
+          "primary_value": 0,
+          "failed": true,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -496,6 +521,7 @@
         },
         {
           "profile": "j25-wly-g1",
+          "primary_value": 9.426361151984244,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -519,6 +545,7 @@
         },
         {
           "profile": "j25-wly-graalvm",
+          "primary_value": 9.544801889095424,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -542,6 +569,7 @@
         },
         {
           "profile": "j25-wly-parallel",
+          "primary_value": 9.511517402398967,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -565,6 +593,7 @@
         },
         {
           "profile": "j25-zgc",
+          "primary_value": 8.718093899941268,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -591,9 +620,13 @@
     "vanilla": {
       "title": "Workload A - vanilla worldgen (control)",
       "mods_loaded": 45,
+      "primary_metric": "chunks/s",
+      "primary_lower_is_better": false,
+      "worldgen": true,
       "rows": [
         {
           "profile": "baseline-j21",
+          "primary_value": 11.571638819588784,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -617,6 +650,7 @@
         },
         {
           "profile": "j21-g1-bruce",
+          "primary_value": 12.19215064672909,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -640,6 +674,7 @@
         },
         {
           "profile": "j21-graalvm-g1-bruce",
+          "primary_value": 15.006671082871913,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -663,6 +698,7 @@
         },
         {
           "profile": "j21-graalvm-parallel",
+          "primary_value": 14.849442962112935,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -686,6 +722,7 @@
         },
         {
           "profile": "j21-graalvm-serial",
+          "primary_value": 14.673963504433988,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -709,6 +746,7 @@
         },
         {
           "profile": "j21-parallel",
+          "primary_value": 11.527165874967135,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -732,6 +770,7 @@
         },
         {
           "profile": "j21-serial",
+          "primary_value": 12.210710128643898,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -755,6 +794,7 @@
         },
         {
           "profile": "j21-wly-g1",
+          "primary_value": 10.359303777631514,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -781,6 +821,7 @@
         },
         {
           "profile": "j21-zgc",
+          "primary_value": 9.053034095527837,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -804,6 +845,7 @@
         },
         {
           "profile": "j25-g1",
+          "primary_value": 12.497694753654661,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -827,6 +869,7 @@
         },
         {
           "profile": "j25-g1-bruce-coh",
+          "primary_value": 10.247631445390397,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -850,6 +893,7 @@
         },
         {
           "profile": "j25-g1-coh",
+          "primary_value": 11.742563507131894,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -873,6 +917,7 @@
         },
         {
           "profile": "j25-g1-coh-10g",
+          "primary_value": 12.412185681357867,
           "heap": "10G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -896,6 +941,7 @@
         },
         {
           "profile": "j25-g1-coh-4g",
+          "primary_value": 10.919465532794673,
           "heap": "4G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -919,6 +965,7 @@
         },
         {
           "profile": "j25-g1-coh-8g",
+          "primary_value": 10.560155817230603,
           "heap": "8G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -942,6 +989,7 @@
         },
         {
           "profile": "j25-graalvm-g1-bruce-coh",
+          "primary_value": 14.484516525387836,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -965,6 +1013,7 @@
         },
         {
           "profile": "j25-graalvm-g1-coh",
+          "primary_value": 13.530173420101232,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -988,6 +1037,7 @@
         },
         {
           "profile": "j25-graalvm-parallel-coh",
+          "primary_value": 13.94836170590497,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1011,6 +1061,7 @@
         },
         {
           "profile": "j25-parallel-coh",
+          "primary_value": 10.80286525473195,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1034,6 +1085,7 @@
         },
         {
           "profile": "j25-serial-coh",
+          "primary_value": 11.237724883597355,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1057,6 +1109,8 @@
         },
         {
           "profile": "j25-shenandoah-gen",
+          "primary_value": 0,
+          "failed": true,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1080,6 +1134,7 @@
         },
         {
           "profile": "j25-wly-g1",
+          "primary_value": 12.664478863069654,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1103,6 +1158,7 @@
         },
         {
           "profile": "j25-wly-graalvm",
+          "primary_value": 13.881799519950325,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1126,6 +1182,7 @@
         },
         {
           "profile": "j25-wly-parallel",
+          "primary_value": 10.922618945675678,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1149,6 +1206,7 @@
         },
         {
           "profile": "j25-zgc",
+          "primary_value": 9.968633937644464,
           "heap": "6G",
           "hardware": {
             "model": "Neoverse-N1",
@@ -1172,5 +1230,9 @@
         }
       ]
     }
-  }
+  },
+  "workload_order": [
+    "vanilla",
+    "pack"
+  ]
 }

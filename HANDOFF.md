@@ -23,7 +23,7 @@ now understood and fixed.
 | Platform repo | `github.com/6586x57890143/weloveyou.mc` | public, v0.2.0 |
 | Pack repo | `github.com/6586x57890143/weloveyou-pack` | public |
 | Bench boxes | `weloveyou-bench`, `-2`, `-3`, each A1 2 OCPU/12 GB | powered off unless sweeping |
-| Benchmarks | `weloveyou-bench.pox-nugget-mowing.workers.dev` | live, placeholder until a sweep merges |
+| Benchmarks | `weloveyou-bench.pox-nugget-mowing.workers.dev` | live; publishes on a merge to main |
 | Spend | `/var/lib/wly/cost.json` on the server | ~€0.03/day, credits expire 2026-09-15 |
 
 Minecraft 1.21.1, Fabric, Java 25, 71 pack entries, 143 mods loaded server-side.
@@ -174,19 +174,92 @@ That is a hardware finding rather than a mod bug, and unlike the benchmark
 numbers it came from a real failure. If the mods worth having assume spare cores,
 two Ampere cores is the wrong host, and no flag sweep fixes that.
 
+The `village` workload is now the regression test for this. It is entity ticking
+with a player present, which is the trigger, and a watchdog kill is recorded and
+named in the report rather than showing up as a run that quietly failed.
+
 **Pack releases do not reach the server on their own.** It ran the old 17-entry
 pack for three days while v0.1.5 was published, because a release only takes
 effect on restart and nothing restarts it. This is the gap `wly serve` exists to
 close.
 
+### What the first real sweep got wrong about itself
+
+Run `32567742816` measured fine and then misreported three things. All three are
+fixed; they are recorded because each looked like a fact.
+
+**It named the wrong machine.** `BENCHMARKS-screening.md` said
+`host: runnervm76f27`, which is the ubuntu-latest merge runner: `mergeShards`
+took `os.Hostname()` at render time. The numbers came off `weloveyou-bench`,
+`-2` and `-3`. `Result.Host` is now recorded where the measuring happens, the
+merge step no longer claims a hostname at all, and a shard that predates the
+field reports `unrecorded` rather than borrowing whoever rendered it.
+
+**A profile that never ran was published as a score.** `j25-shenandoah-gen`
+failed every run, and because a failed run is skipped it ended with no runs,
+so every median came out zero: `0.0 chunks/s`, `-100.0%`, `0 B`. It now renders
+as `FAILED`. An absence and a catastrophic result are not the same claim.
+
+**MSPT and TPS on the worldgen workloads are confirmed noise, with numbers.**
+Workload B reported TPS exactly `20.0` and MSPT p95 between `0.5ms` and `0.9ms`
+on all 25 profiles; workload A reported `50.0ms` on the nose for seven of them
+and `2.1ms` for another. This is the measurement behind the claim below that the
+instrument had no load. The site now says so on every worldgen table rather than
+publishing fifty rows of idle as though they were a result.
+
+The one finding that survives all of that: **GraalVM takes +29.7% on vanilla
+worldgen and lands inside the noise floor on the pack.** A flag that wins on A
+and loses on B is exactly what the two-workload split exists to surface. It is
+still a single run with no variance, so it is a reason to confirm, not a result.
+
 ### What the benchmark still cannot answer
 
-**TPS and MSPT are wired end to end but mean nothing yet.** spark reports them
-(with `-Dspark.backgroundProfiler=false`, or its async-profiler segfaults the JVM
-on Java 25/aarch64), and they reach the table, the JSON and the site. But
-worldgen pregeneration barely ticks entities, so TPS reads 20 on every profile.
-The instrument exists; the load does not. **Simulated players are the missing
-piece**, and they are what would have caught Async before it reached production.
+**SUPERSEDED: the load now exists.** What was true, and why it was written:
+
+> **TPS and MSPT are wired end to end but mean nothing yet.** spark reports them
+> (with `-Dspark.backgroundProfiler=false`, or its async-profiler segfaults the
+> JVM on Java 25/aarch64), and they reach the table, the JSON and the site. But
+> worldgen pregeneration barely ticks entities, so TPS reads 20 on every profile.
+> The instrument exists; the load does not. **Simulated players are the missing
+> piece**, and they are what would have caught Async before it reached production.
+
+Three tick workloads now supply it, driven over the same `rcon-cli` path the
+sweep already used. Carpet is pinned as a third instrument next to spark and
+Chunky and loaded through `MODS=`; it is deliberately NOT in the pack, because a
+fake-player mod has no business shipping to players.
+
+| workload | the load | why it is the one worth measuring |
+|---|---|---|
+| `explore` | carpet fake players teleported outward along fixed bearings, mob spawning left ON | chunk load churn plus the spawning that follows a moving player; the dominant real cost on a small server |
+| `village` | 40 villagers on a filled composter grid, natural spawning OFF | entity AI and pathfinding, the heaviest load vanilla has and the one lithium changes most |
+| `machines` | a powered Oritech array fed by `oritech:creative_storage_block` | block entity ticking and energy network cost, which is the pack's own signature |
+
+Three things about them that are easy to get wrong:
+
+- **They are read by MSPT p95, not TPS.** TPS is capped at 20, so a load that is
+  merely heavy reads 20 on every profile and reproduces the exact blind spot
+  above. p95 tick duration is unbounded and moves long before TPS does.
+- **The bots are teleported, not pathfound.** A walking bot gets stuck on
+  terrain, drowns, or falls into a ravine, which would make the load depend on
+  where the fixed seed happened to put one. Teleporting is terrain-independent
+  and repeatable, and elytra travel is how a player really churns chunks anyway.
+  For the same reason `village` and `machines` build on a stone platform in the
+  air rather than on whatever terrain spawn produced.
+- **`--load` is a required calibration step, not a nicety.** A workload whose
+  load cannot move p95 measures nothing while still printing a plausible row.
+  Run `--only baseline-j21 --workload players --runs 1` and raise `--load` until
+  p95 clears the idle floor, then leave it there.
+
+**`machines` still needs one verification pass on a real server.** Confirm the
+pulverizer is a single block rather than a frame-and-core multiblock and that the
+pipes connect as placed; `oritech:powered_furnace_block` is the fallback. Until
+that is done it is capable of measuring an empty platform and reporting a number
+for it, which is the same failure mode `jvm-profiles.toml` guards against for
+JVM flags the JVM accepts and then ignores.
+
+**A watchdog kill is now a recorded outcome**, not a missing row. That is the
+Async failure mode exactly, and reported as a container flake it would be
+debugged as one.
 
 **Every result now records its hardware**: model, cores, threads per core, RAM,
 arch. A table that mixes machines says so, in the report and on the site. That is
@@ -209,9 +282,11 @@ an image that does not exist yet.
 
 **Reordered again 2026-08-22.** The benchmark took priority over the Discord
 work because the pack tripled in size and a mod that looked like a performance
-win crash-looped production instead. Simulated players are the next real piece:
-without them TPS is pinned at 20 and the suite cannot see the failures that
-actually matter.
+win crash-looped production instead. Simulated players were the next real piece,
+and the harness for them has landed (see above). What remains is not code: the
+sweep itself has never produced a committed row, so `BENCHMARKS.md` is still the
+placeholder and no flag choice here is measured. Run the three passes it
+documents before trusting anything about this box's JVM configuration.
 
 **Reordered 2026-08-19.** Pack development came first: `weloveyou-pack` now has
 `scripts/pack-dev.sh` (add/rm/check/play), so a mod change can be joined on a

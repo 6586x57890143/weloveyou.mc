@@ -15,6 +15,13 @@ on:
     branches: [main]
     paths:
       - BENCHMARKS.json
+      # A screening pass is 25 profiles; a confirmation pass is the handful of
+      # them worth confirming. Watching only the confirmed file meant the
+      # broadest data we have could never reach the page. The gate that matters
+      # is unchanged: publishing still keys off a HUMAN MERGE to main, never off
+      # a sweep finishing, and the page labels a screening section as one run
+      # with no variance rather than leaving the reader to remember.
+      - BENCHMARKS-screening.json
       - scripts/bench-site.py
       - .github/workflows/pages.yml
   workflow_dispatch:
@@ -56,7 +63,7 @@ jobs:
           fi
 
       - name: render the site
-        run: python scripts/bench-site.py --json BENCHMARKS.json --out site
+        run: python scripts/bench-site.py --json BENCHMARKS.json --screening BENCHMARKS-screening.json --out site
 
       # Workers Static Assets, configured in wrangler.jsonc. Uploads only the
       # rendered directory, so Cloudflare is never granted read access to the

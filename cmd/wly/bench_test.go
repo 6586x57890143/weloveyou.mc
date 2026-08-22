@@ -191,3 +191,37 @@ func TestMergeShardsRejectsAnEmptyList(t *testing.T) {
 		t.Error("merging nothing should be an error, not an empty report")
 	}
 }
+
+// TestDryRunPrintsTheDriveScript is the local verification path for a new
+// workload: the alternative is finding out that a command was malformed on a
+// bench box that bills by the hour, from a log where a rejected command is one
+// grey line among thousands.
+//
+// The script is printed before the docker probe deliberately, so this works on
+// a machine with no docker - which is every CI runner.
+func TestDryRunPrintsTheDriveScript(t *testing.T) {
+	var out strings.Builder
+	// The probe will fail here if docker is absent and succeed if it is not.
+	// Either way the script must already have been printed.
+	_ = benchCmd([]string{
+		"--profiles", writeProfiles(t, twoProfiles),
+		"--workload", "players", "--dry-run", "--only", "baseline-j21",
+	}, &out)
+
+	got := out.String()
+	for _, want := range []string{
+		"drive: carpet commandPlayer true",
+		"drive: summon minecraft:villager",
+		"drive: fill", // the platform, the composters and the machine array
+		"oritech:creative_storage_block",
+		"step:  tp BotNorth",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dry run did not print %q:\n%s", want, got)
+		}
+	}
+	// A worldgen workload has no step script and must not claim one.
+	if strings.Contains(got, "Workload A") {
+		t.Errorf("--workload players should not have printed a worldgen workload:\n%s", got)
+	}
+}

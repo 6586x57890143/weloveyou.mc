@@ -3,6 +3,7 @@ package bench
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -128,4 +129,23 @@ func ParseMemTotal(s string) int {
 		return 0
 	}
 	return kb / 1024
+}
+
+// Hosts returns the distinct machines a set of results was measured on, sorted.
+//
+// Reported instead of the rendering machine's hostname. A sharded sweep is
+// measured on several boxes and merged on a different one entirely, so the
+// hostname at render time names a machine that never ran a benchmark.
+func Hosts(rs []Result) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range rs {
+		if r.Host == "" || seen[r.Host] {
+			continue
+		}
+		seen[r.Host] = true
+		out = append(out, r.Host)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -18,22 +18,32 @@ import (
 // whatever renders the page.
 func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 	doc := jsonDoc{
-		Host:          host,
+		Host:          hostLine(results, host),
 		Generated:     when.UTC().Format(time.RFC3339),
 		Repeats:       maxRepeats(results),
 		NoiseFloorPct: NoiseFloor,
 		Workloads:     map[string]jsonWorkload{},
 	}
-	for _, w := range []Workload{WorkloadVanilla, WorkloadPack} {
+	for _, w := range AllWorkloads {
 		rows := filter(results, w)
 		if len(rows) == 0 {
 			continue
 		}
-		base := baselineOf(rows)
-		wl := jsonWorkload{Title: workloadTitle(w), Mods: modsOf(rows)}
+		sp := SpecFor(w)
+		base := baselineOf(rows, sp.Metric)
+		wl := jsonWorkload{
+			Title: workloadTitle(w), Mods: modsOf(rows),
+			Metric: sp.Metric.Label, Lower: sp.Metric.Lower, Worldgen: sp.Worldgen(),
+		}
 		for _, r := range rows {
 			cps := r.ChunksPerSec()
 			wl.Rows = append(wl.Rows, jsonRow{
+				Primary:  sp.Metric.Of(r),
+				Watchdog: watchdogged(r),
+				// Failed says the profile produced no run at all. Without it
+				// every number below is a zero and the site renders a
+				// catastrophic score for something that never ran.
+				Failed:       r.Failed(),
 				Profile:      r.Profile,
 				Heap:         r.Heap,
 				Hardware:     r.Hardware,
@@ -43,7 +53,7 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 				MSPTMedianMs: r.MSPTMed(),
 				MSPTP95Ms:    r.MSPTP95(),
 				TPS:          r.TPS(),
-				VsBaseline:   delta(base, cps),
+				VsBaseline:   delta(base, sp.Metric.Of(r), sp.Metric),
 				PeakRSSBytes: r.PeakRSS(),
 				StartupSec:   r.Startup(),
 				GCPauseP99Ms: r.GCPause(99),
@@ -52,6 +62,7 @@ func RenderJSON(results []Result, host string, when time.Time) ([]byte, error) {
 			})
 		}
 		doc.Workloads[string(w)] = wl
+		doc.Order = append(doc.Order, string(w))
 	}
 	return json.MarshalIndent(doc, "", "  ")
 }
@@ -62,16 +73,34 @@ type jsonDoc struct {
 	Repeats       int                     `json:"repeats_per_profile"`
 	NoiseFloorPct float64                 `json:"noise_floor"`
 	Workloads     map[string]jsonWorkload `json:"workloads"`
+	// Order is the render order. A JSON object is unordered and Go marshals map
+	// keys alphabetically, so without this the site listed workload E before
+	// workload B and the control stopped being the first thing anyone read.
+	Order []string `json:"workload_order"`
 }
 
 type jsonWorkload struct {
-	Title string    `json:"title"`
-	Mods  int       `json:"mods_loaded"`
-	Rows  []jsonRow `json:"rows"`
+	Title string `json:"title"`
+	Mods  int    `json:"mods_loaded"`
+	// Metric is the column this workload is read by, and Lower which direction
+	// is good. The site renders from this file, so the direction has to travel
+	// with the data rather than being reimplemented in the page generator.
+	Metric   string    `json:"primary_metric"`
+	Lower    bool      `json:"primary_lower_is_better"`
+	Worldgen bool      `json:"worldgen"`
+	Rows     []jsonRow `json:"rows"`
 }
 
 type jsonRow struct {
-	Profile      string   `json:"profile"`
+	Profile string `json:"profile"`
+	// Primary is the value of this workload's primary metric, duplicated out of
+	// whichever column holds it so a consumer need not know which one that is.
+	Primary  float64 `json:"primary_value"`
+	Watchdog bool    `json:"watchdog,omitempty"`
+	// Failed says the profile produced no run at all. Without it every number
+	// below is a zero, and the site renders a catastrophic score for something
+	// that never ran.
+	Failed       bool     `json:"failed,omitempty"`
 	Heap         string   `json:"heap,omitempty"`
 	Hardware     Hardware `json:"hardware"`
 	PeakCPUPct   float64  `json:"peak_cpu_percent"`

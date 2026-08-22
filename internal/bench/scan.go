@@ -54,6 +54,9 @@ func (s *Scanner) Feed(line string) (justReady bool) {
 			s.run.Elapsed = s.now().Sub(s.genStart)
 		}
 	}
+	if ParseWatchdog(line) {
+		s.run.Watchdog = true
+	}
 	if isPregenDone(line) {
 		s.finished = true
 	}
@@ -110,37 +113,40 @@ func contains(h, n string) bool {
 	return false
 }
 
-// ParseWorkloads turns the --workload flag into the list to run.
-func ParseWorkloads(s string) ([]Workload, error) {
-	switch s {
-	case "vanilla":
-		return []Workload{WorkloadVanilla}, nil
-	case "pack":
-		return []Workload{WorkloadPack}, nil
-	case "both", "":
-		return []Workload{WorkloadVanilla, WorkloadPack}, nil
-	}
-	return nil, &UnknownWorkloadError{Value: s}
-}
-
-// UnknownWorkloadError is returned for an unrecognised --workload.
-type UnknownWorkloadError struct{ Value string }
-
-func (e *UnknownWorkloadError) Error() string {
-	return "unknown workload " + e.Value + "; want vanilla, pack or both"
-}
-
-// Select narrows the runnable profiles to one by name, or returns them all.
+// Select narrows the runnable profiles to those named, or returns them all.
+//
+// It takes a comma-separated list rather than a single name because the
+// confirmation pass runs the workloads that cost money against the handful of
+// profiles screening liked, and naming them one invocation at a time meant one
+// bench-box boot per profile.
 func Select(ps []Profile, only string) ([]Profile, error) {
+	only = strings.TrimSpace(only)
 	if only == "" {
 		return ps, nil
 	}
-	for _, p := range ps {
-		if p.Name == only {
-			return []Profile{p}, nil
+	want := map[string]bool{}
+	for _, n := range strings.Split(only, ",") {
+		if n = strings.TrimSpace(n); n != "" {
+			want[n] = true
 		}
 	}
-	return nil, &UnknownProfileError{Name: only}
+	var out []Profile
+	for _, p := range ps {
+		if want[p.Name] {
+			out = append(out, p)
+			delete(want, p.Name)
+		}
+	}
+	// A typo must not silently measure a smaller matrix and still produce a
+	// plausible report, which is the rule resolveFlagsets already holds for an
+	// unknown flagset.
+	for n := range want {
+		return nil, &UnknownProfileError{Name: n}
+	}
+	if len(out) == 0 {
+		return nil, &UnknownProfileError{Name: only}
+	}
+	return out, nil
 }
 
 // UnknownProfileError is returned when --only names nothing runnable.
