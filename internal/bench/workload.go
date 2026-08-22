@@ -237,7 +237,7 @@ func exploreDrive(p Params) []string {
 	return out
 }
 
-// exploreStep moves every bot one stride further out along its own bearing.
+// exploreStep moves every bot along its bearing, out to the radius and back.
 //
 // Teleporting rather than walking is deliberate. A walking bot gets stuck on
 // terrain, drowns, or falls into a ravine, which would make the load depend on
@@ -245,8 +245,28 @@ func exploreDrive(p Params) []string {
 // exists to prevent. Teleporting is terrain-independent and repeatable, and it
 // is the honest simulation anyway: elytra and boat travel is how a player
 // actually generates chunk load churn.
+//
+// It patrols rather than running outward forever. The first version did
+// `stride * (n + 1)`, which never turns around: six bots generated brand new
+// terrain continuously for the whole steady window, reused nothing, and made
+// the total world size a function of how long the workload ran - so changing
+// Steady changed the answer, and two runs of different lengths were not
+// comparable. It is also the prime suspect for the run that died four minutes
+// in. Out and back keeps the churn going inside a bounded region.
 func exploreStep(n int, p Params) []string {
-	d := exploreStride(p) * (n + 1)
+	stride := exploreStride(p)
+	legs := p.Radius / stride
+	if legs < 1 {
+		legs = 1
+	}
+	// Triangle wave starting one stride out, so the very first step already
+	// moves somebody. Every bot keeps moving and none leaves the radius the
+	// workload was asked for.
+	phase := (n + 1) % (2 * legs)
+	if phase > legs {
+		phase = 2*legs - phase
+	}
+	d := stride * phase
 	var out []string
 	for _, b := range bots[:botCount(p.Load)] {
 		out = append(out, fmt.Sprintf("tp %s %d 120 %d", b.Name, b.DX*d, b.DZ*d))

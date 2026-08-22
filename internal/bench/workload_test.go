@@ -1,6 +1,7 @@
 package bench
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -162,8 +163,8 @@ func TestExploreDrivesEveryBotOutwardOnItsOwnBearing(t *testing.T) {
 		}
 	}
 
-	// Each step must move every bot strictly further out, or the workload is a
-	// bot standing still and the chunk churn never happens.
+	// Every step must move every bot, or the workload is a bot standing still
+	// and the chunk churn never happens.
 	first := exploreStep(0, p)
 	second := exploreStep(1, p)
 	if len(first) != botCount(p.Load) || len(second) != len(first) {
@@ -174,6 +175,33 @@ func TestExploreDrivesEveryBotOutwardOnItsOwnBearing(t *testing.T) {
 	}
 	if !contains(first[0], "tp BotNorth 0 120 -100") {
 		t.Errorf("first north step = %q, want a stride of radius/10", first[0])
+	}
+
+	// The patrol is bounded and it turns around. Running outward forever made
+	// the world size a function of how long the workload ran, so two runs of
+	// different lengths were not comparable, and it is the prime suspect for
+	// the run that died partway through.
+	var maxOut, turns int
+	prev := 0
+	for n := range 60 {
+		cmd := exploreStep(n, p)[0]
+		var name string
+		var x, y, z int
+		fmt.Sscanf(cmd, "tp %s %d %d %d", &name, &x, &y, &z)
+		d := -z
+		if d > maxOut {
+			maxOut = d
+		}
+		if n > 0 && ((d < prev && turns%2 == 0) || (d > prev && turns%2 == 1)) {
+			turns++
+		}
+		prev = d
+	}
+	if maxOut > p.Radius {
+		t.Errorf("bots reached %d blocks, beyond the %d they were asked for", maxOut, p.Radius)
+	}
+	if turns < 2 {
+		t.Errorf("the patrol turned around %d times in 60 steps; it is not a loop", turns)
 	}
 	// Below six chunks consecutive positions share most of their loaded chunks.
 	if got := exploreStride(Params{Radius: 100}); got != 96 {
