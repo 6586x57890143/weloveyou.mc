@@ -231,6 +231,24 @@ func TestVillageSummonsItsOwnPopulationOnAFixedPlatform(t *testing.T) {
 		"summon minecraft:villager"); n != 80 {
 		t.Errorf("summoned %d villagers at load 2, want 80", n)
 	}
+
+	// Workstations have to keep up with the population. A fixed strip starved
+	// the surplus, which then stopped pathing and went idle, so past a certain
+	// load the knob stopped changing anything and quietly lied.
+	for _, load := range []float64{1, 3, 5} {
+		var depth int
+		for _, cmd := range villageDrive(Params{Load: load}) {
+			if strings.Contains(cmd, "minecraft:composter") {
+				var a, b, c, d, e, f int
+				fmt.Sscanf(cmd, "fill %d %d %d %d %d %d", &a, &b, &c, &d, &e, &f)
+				depth = f - c + 1
+			}
+		}
+		if posts := depth * (2*platformHalf + 1); posts < villagerCount(load) {
+			t.Errorf("load %g: %d villagers but only %d workstations",
+				load, villagerCount(load), posts)
+		}
+	}
 }
 
 func TestMachinesBuildsAPoweredArray(t *testing.T) {
