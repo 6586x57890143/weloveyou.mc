@@ -114,3 +114,16 @@ func TestRenderWarnsWhenHardwareIsMixed(t *testing.T) {
 }
 
 func zeroTime() time.Time { return time.Unix(0, 0) }
+
+func TestParseLscpuFallsBackToVendor(t *testing.T) {
+	// Some aarch64 lscpu builds omit "Model name" entirely and only carry the
+	// vendor, which is still better than an unnamed machine in the table.
+	h := ParseLscpu("Architecture: aarch64\nVendor ID: ARM\nCPU(s): 2")
+	if h.Model != "ARM" {
+		t.Errorf("Model = %q, want the vendor as fallback", h.Model)
+	}
+	// And when neither is present, no field is invented.
+	if got := ParseLscpu("CPU(s): 4").Model; got != "" {
+		t.Errorf("Model = %q, want empty when lscpu says nothing", got)
+	}
+}

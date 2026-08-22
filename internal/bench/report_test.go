@@ -189,3 +189,25 @@ func TestRenderDoesNotWarnAboutPackGrowthOnTheControl(t *testing.T) {
 		t.Errorf("the pack-growth caveat does not belong on the control:\n%s", out)
 	}
 }
+
+func TestFilterSortsBaselineFirstThenAlphabetically(t *testing.T) {
+	// The row everything else is measured against belongs at the top, and the
+	// rest in a stable order so a diff of BENCHMARKS.md shows what moved rather
+	// than what got shuffled.
+	in := []Result{
+		{Profile: "zzz", Workload: WorkloadPack},
+		{Profile: "aaa", Workload: WorkloadPack},
+		{Profile: Baseline, Workload: WorkloadPack},
+		{Profile: "mmm", Workload: WorkloadVanilla},
+	}
+	got := filter(in, WorkloadPack)
+	want := []string{Baseline, "aaa", "zzz"}
+	if len(got) != len(want) {
+		t.Fatalf("filter returned %d rows, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].Profile != w {
+			t.Errorf("row %d = %q, want %q", i, got[i].Profile, w)
+		}
+	}
+}
