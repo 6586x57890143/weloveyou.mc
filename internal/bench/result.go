@@ -48,13 +48,26 @@ type Result struct {
 	// Commit is the source the sweep was built from, and Radius and Load the
 	// settings it ran with. All three change the numbers, so they travel with
 	// them rather than living in a workflow log that ages out in three days.
-	Commit   string
-	Radius   int
-	Load     float64
-	Heap     string // the heap it ran with, so a row is self-describing
-	Workload Workload
-	Runs     []Run
-	Dropped  []string // flags the JVM refused during preflight
+	Commit string
+	Radius int
+	Load   float64
+	// What was actually under test. All of this existed at run time inside Env
+	// and was thrown away, so a published row could not answer "which Java 25?"
+	// or "which pack?". Image is the container tag, Java the JVM's own version
+	// string, JVMArgs the flags that survived preflight, Pack the modpack
+	// revision and its content hash.
+	Image   string
+	Java    string
+	JVMArgs []string
+	Pack    Pack
+	// Attempted is how many runs were ASKED for; len(Runs) is how many
+	// finished. Without both, a row where two of three crashed publishes as a
+	// clean median of one and reads as a deliberate single run.
+	Attempted int
+	Heap      string // the heap it ran with, so a row is self-describing
+	Workload  Workload
+	Runs      []Run
+	Dropped   []string // flags the JVM refused during preflight
 }
 
 func (res Result) collect(f func(Run) float64) []float64 {

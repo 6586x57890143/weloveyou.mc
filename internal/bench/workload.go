@@ -43,6 +43,10 @@ type Params struct {
 	// whose load cannot move MSPT is not measuring anything, and how much load
 	// this box needs is a property of the box rather than something to hardcode.
 	Load float64
+	// Pack is the revision the sweep resolved before it started. Env pins the
+	// loader from it, so the bench runs the loader the pack declares instead of
+	// whatever the image resolves as latest on the day.
+	Pack Pack
 }
 
 // Metric is the number a workload is read by.
