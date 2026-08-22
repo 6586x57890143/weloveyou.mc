@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,5 +134,60 @@ func TestWriteReportsReportsAnUnwritablePath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "nope", "B.md")
 	if err := writeReports(nil, "h", missing, ""); err == nil {
 		t.Error("writing into a missing directory should fail")
+	}
+}
+
+func TestMergeShardsCombinesFiles(t *testing.T) {
+	// The whole point of sharding is that several boxes measure in parallel, so
+	// this is the step that decides whether the table reflects all of them or
+	// quietly only some.
+	dir := t.TempDir()
+	write := func(name, profile string, chunks int) string {
+		p := filepath.Join(dir, name)
+		raw, err := bench.MarshalResults([]bench.Result{{
+			Profile: profile, Heap: "6G", Workload: bench.WorkloadPack,
+			Runs: []bench.Run{{Chunks: chunks, Elapsed: time.Second, TPS: 20}},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, raw, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a := write("a.json", bench.Baseline, 100)
+	b := write("b.json", "j25-g1-coh", 140)
+
+	md := filepath.Join(dir, "M.md")
+	var buf strings.Builder
+	if err := mergeShards(a+","+b, md, "", &buf); err != nil {
+		t.Fatalf("mergeShards() = %v", err)
+	}
+	table, err := os.ReadFile(md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{bench.Baseline, "j25-g1-coh"} {
+		if !strings.Contains(string(table), want) {
+			t.Errorf("%s missing from the merged table:\n%s", want, table)
+		}
+	}
+}
+
+func TestMergeShardsRejectsAMissingFile(t *testing.T) {
+	// Silently skipping an unreadable shard would publish a table that looks
+	// complete and is not.
+	dir := t.TempDir()
+	err := mergeShards(filepath.Join(dir, "nope.json"), filepath.Join(dir, "M.md"), "", io.Discard)
+	if err == nil {
+		t.Error("a missing shard file should be an error")
+	}
+}
+
+func TestMergeShardsRejectsAnEmptyList(t *testing.T) {
+	dir := t.TempDir()
+	if err := mergeShards(" , ", filepath.Join(dir, "M.md"), "", io.Discard); err == nil {
+		t.Error("merging nothing should be an error, not an empty report")
 	}
 }
