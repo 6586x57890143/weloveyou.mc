@@ -1,0 +1,20 @@
+# Nightly world backup. Install on the production box:
+#   sudo install -m755 deploy/backup.sh /opt/deploy/backup.sh
+#   sudo install -m644 deploy/wly-backup.{service,timer} /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now wly-backup.timer
+#
+# BACKUP_TARGET lives in /etc/default/wly-backup (one line, rsync destination)
+# so the destination can change without touching a unit. Root needs an ssh key
+# that reaches it; without one the backup still runs and keeps two local copies.
+[Unit]
+Description=Back up the Minecraft world
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/default/wly-backup
+ExecStart=/opt/deploy/backup.sh
+# The tar is the one thing on this box that competes with the server for IO.
+IOSchedulingClass=idle
+Nice=10

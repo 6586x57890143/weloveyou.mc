@@ -9,7 +9,11 @@
 
 services:
   mc:
-    image: itzg/minecraft-server:java25
+    # Pinned through a variable for the same reason WLY_IMAGE is: `java25` is a
+    # MOVING tag and compose pulls before every up, so the JVM under the server
+    # can change on a deploy that touched nothing. Roll back by putting a dated
+    # tag in .env, no rebuild and no revert.
+    image: "${MC_IMAGE:-itzg/minecraft-server:java25}"
     container_name: wly-mc
     restart: unless-stopped
     stdin_open: true
@@ -77,6 +81,20 @@ services:
         -XX:+UseCompactObjectHeaders
         ${MC_JVM_XX_OPTS:-}
 
+      # Two cores. This is the cheapest TPS lever on this hardware and it sat at
+      # itzg's 10/10 default while fifteen JVM flags were argued line by line
+      # above it. Simulation distance is the expensive one: it sets how far
+      # entities, block entities and redstone actually tick, and the `explore`
+      # workload showed travel saturating both cores at 65ms p95. View distance
+      # only streams chunks to clients, so it can stay a notch higher.
+      # Raise these only against a measured row, never because they feel small.
+      VIEW_DISTANCE: "${MC_VIEW_DISTANCE:-8}"
+      SIMULATION_DISTANCE: "${MC_SIMULATION_DISTANCE:-6}"
+
+      # Every deploy used to drop players mid-sentence. 30s and a countdown in
+      # chat, well inside the 120s stop grace period below.
+      STOP_SERVER_ANNOUNCE_DELAY: "30"
+
       ENABLE_RCON: "true"
       RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in deploy/.env}"
       ONLINE_MODE: "true"
@@ -103,6 +121,16 @@ services:
 
     ports:
       - "25565:25565"
+      # simple-voice-chat is UDP and nothing published UDP at all, so it failed
+      # with no server-side error, which is why nobody noticed. A port with no
+      # protocol suffix is TCP only. This must match `port` in
+      # config/voicechat/voicechat-server.properties; -1 there means "reuse the
+      # game port", which would need 25565/udp published instead.
+      - "24454:24454/udp"
+      # squaremap serves its own tiles. Its internal default is 8080, which is
+      # taken on the host by dozzle, hence the shift. Must match `port` in
+      # config/squaremap/config.yml.
+      - "${MC_MAP_PORT:-8123}:8080"
       # RCON is loopback only. It is an admin channel with a shared password;
       # wly reaches it over the compose network, nothing else should.
       - "127.0.0.1:25575:25575"

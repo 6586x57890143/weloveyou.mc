@@ -1,0 +1,13 @@
+# 04:30 UTC: after the daily cost report at 06:30 would be fine too, but this is
+# the quietest hour for players and the tar wants the server idle.
+[Unit]
+Description=Nightly Minecraft world backup
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 UTC
+# The box is always on, but a reboot at 04:30 should not skip a night.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

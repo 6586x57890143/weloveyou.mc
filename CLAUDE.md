@@ -21,9 +21,11 @@ afternoon. This file is the day-to-day reference, that one gets you oriented.
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phases 0, 1 and 3 done.** Server is live and joinable, pack publishes to
-Cloudflare Pages. Phase 2 (the Discord design passes) got pushed back in favour of the
-pack development loop, which now lives in `weloveyou-pack` as `scripts/pack-dev.sh`.
+**Status: phases 0, 1 and 3 done, phase 2 in progress.** Server is live and joinable,
+pack publishes to Cloudflare Pages. Phase 2 is now "make the server playable", not the
+Discord design passes: backups (`deploy/backup.sh`, written, **not yet installed on the
+box**) and the compose audit fixes. The pack development loop lives in `weloveyou-pack`
+as `scripts/pack-dev.sh`.
 
 *Last swept 2026-08-22.* See **Keeping these docs honest** at the end.
 
@@ -66,7 +68,10 @@ internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, dif
 internal/mcevents/  PURE: log line -> event, one regex table per MC generation
 worker/             Cloudflare Worker, read-only
 
-deploy/             Dockerfile for wly, docker-compose.yml for mc + wly
+deploy/             Dockerfile for wly, docker-compose.yml for mc + wly,
+                    backup.sh + wly-backup.{service,timer}, and the copies of the
+                    box-side scripts that are reviewable (provision-box, bench-reaper,
+                    wly-health-gate)
 scripts/            CI helpers that must also run by hand
 ```
 
@@ -123,10 +128,34 @@ be influenced by the caller. Verified: `rm -rf /`, `deploy ../../etc/passwd` and
 /srv/app/deploy/.env         secrets. gitignored, so `git checkout --force` never touches it.
 ```
 
+`MC_IMAGE` is the same lever for the Minecraft image. `itzg/minecraft-server:java25` is a
+moving tag and `pull` runs before every `up`, so without it the JVM under the server can
+change on a deploy that touched nothing.
+
 Rolling back is `WLY_IMAGE=ghcr.io/…:vX.Y.Z` in `.env` plus a redeploy, no rebuild, no revert.
 
 `docker compose pull` runs before `up` because `up` alone will happily keep a stale local
 image that shares a tag with a newer remote one, which would make a deploy silently do nothing.
+
+## Backups
+
+`deploy/backup.sh` on a nightly timer: RCON `save-off`, `save-all flush`, tar from inside
+the container, `save-on` from a trap, keep two archives on the box, rsync one to
+`BACKUP_TARGET`. Four things it encodes:
+
+- **`save-on` is a trap.** An interrupted backup that leaves saving off is silent until
+  the next restart, and everything played in between is gone.
+- **The tar runs in the container**, so nothing has to know the compose volume prefix.
+- **tar exits non-zero routinely** on a live world ("file changed as we read it"). `gzip -t`
+  is what separates that from a truncated archive.
+- **Staleness is the alert, not failure.** The off-box destination is a desktop that is
+  often off; two local copies mean that is not an incident. The newest archive passing 36h
+  is, and it catches a failed run, a timer that never fired, and a dead container alike.
+
+`BACKUP_TARGET` is one setting and deliberately temporary, not a design. Object storage
+replaces the desktop later and nothing else changes.
+
+**No restore has ever been tested.** Until one has, this is a script, not a backup.
 
 ## Spend
 
