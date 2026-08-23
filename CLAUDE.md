@@ -21,10 +21,10 @@ afternoon. This file is the day-to-day reference, that one gets you oriented.
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phases 0, 1 and 3 done, phase 2 in progress.** Server is live and joinable,
-pack publishes to Cloudflare Pages. Phase 2 is now "make the server playable", not the
-Discord design passes: backups (`deploy/backup.sh`, written, **not yet installed on the
-box**) and the compose audit fixes. The pack development loop lives in `weloveyou-pack`
+**Status: phases 0, 1, 2 and 3 done.** Server is live and joinable, pack publishes to
+Cloudflare Pages. Phase 2 was "make the server playable", not the Discord design passes:
+backups (`deploy/backup.sh`, installed and restored once on 2026-08-23) and the compose
+audit fixes. The pack development loop lives in `weloveyou-pack`
 as `scripts/pack-dev.sh`.
 
 *Last swept 2026-08-22.* See **Keeping these docs honest** at the end.
@@ -155,7 +155,10 @@ the container, `save-on` from a trap, keep two archives on the box, rsync one to
 `BACKUP_TARGET` is one setting and deliberately temporary, not a design. Object storage
 replaces the desktop later and nothing else changes.
 
-**No restore has ever been tested.** Until one has, this is a script, not a backup.
+**Restore verified 2026-08-23** into a throwaway volume: level.dat, regions, playerdata,
+whitelist, ops and config all came back, `mods/` correctly did not. `BACKUP_TARGET` is
+still empty, so the off-box copy does not exist yet and the staleness alert is what would
+tell you.
 
 ## Spend
 

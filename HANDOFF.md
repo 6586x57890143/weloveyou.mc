@@ -376,14 +376,16 @@ Results now say what they measured and publish themselves.
   failure the numbers park on `bench/held-*`. **There is no human step any
   more**, which is what fixed findings never reaching the page.
 
-### Phase 2, make the server playable: WRITTEN, NOT YET ON THE BOX
+### Phase 2, make the server playable: DONE, 2026-08-23
 
 Everything below came out of a full audit of `deploy/docker-compose.yml` on
 2026-08-22. It is what EXISTS, not speculation. The code half is now done; the
 install half needs a restart window, because **Phase 2 touches the server
 players use**.
 
-**Backups exist now, on disk here, not on the box yet.**
+**Backups exist and have been restored once.** Installed on the box 2026-08-23,
+first archive taken by hand and watched, restore verified into a throwaway
+volume. `wly-backup.timer` is armed for 04:30 UTC daily.
 
 | file | what it is |
 |---|---|
@@ -391,7 +393,7 @@ players use**.
 | `deploy/wly-backup.service` | oneshot, `EnvironmentFile=-/etc/default/wly-backup`, idle IO |
 | `deploy/wly-backup.timer` | 04:30 UTC, `Persistent=true` |
 
-Install, which nobody has run yet:
+Install, already run on the production box:
 
 ```bash
 sudo install -m755 deploy/backup.sh /opt/deploy/backup.sh
@@ -400,6 +402,25 @@ echo 'BACKUP_TARGET=kon@<desktop-tailnet-ip>:/backups/wly' | sudo tee /etc/defau
 sudo systemctl daemon-reload && sudo systemctl enable --now wly-backup.timer
 sudo /opt/deploy/backup.sh          # take the first one by hand and watch it
 ```
+
+**`BACKUP_TARGET` is still empty**, so there are two copies on the box and none
+off it. Setting it needs an ssh key for root that reaches the desktop, which is
+the one step here nobody can do for you. Until then the staleness alert is the
+only thing standing between an off-box copy and nobody noticing there is not
+one.
+
+**The restore, verified 2026-08-23**, which is what makes this a backup rather
+than a script:
+
+```bash
+docker volume create wly-restore-test
+docker run --rm -i --entrypoint tar -v wly-restore-test:/data   itzg/minecraft-server:java25 -xzf - -C /data < /var/lib/wly/backups/world-*.tar.gz
+```
+
+Came back: `world/level.dat`, 15 region files, `world/playerdata`,
+`server.properties`, `whitelist.json`, `ops.json`, `config/`. No `mods/`, which
+is correct: it is excluded and comes back from `PACKWIZ_URL` on the next start.
+A 273M `/data` archives to 36M.
 
 Four decisions in it worth not relitigating:
 
@@ -430,10 +451,9 @@ once on a bench box before this is called finished.
   suffix, so Docker published TCP only and no UDP reached the container at all.
   `24454/udp` is now published. It must match `port` in
   `config/voicechat/voicechat-server.properties`; `-1` there means "reuse the
-  game port", which would need `25565/udp` published instead. The mod **is** in
-  `pack/stable`, side `both` (checked 2026-08-23), and the pack ships no config,
-  so the server wrote the mod's own default of 24454. Confirm that file on the
-  box during the restart window.
+  game port", which would need `25565/udp` published instead. **Confirmed on the
+  box 2026-08-23: `port=24454`.** The mod is in `pack/stable`, side `both`, and
+  the pack ships no config, so the server wrote the mod's own default.
 - **squaremap is not in the pack at all.** Checked 2026-08-23: no
   `squaremap.pw.toml` in `pack/stable/mods`. "The map is unreachable because no
   port is published" was one layer short - there is nothing listening to reach,
