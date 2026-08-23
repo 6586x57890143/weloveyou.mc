@@ -1,11 +1,13 @@
 # Handoff 💖
 
 Notes for whoever picks this up next, including future me. Current as of
-**v0.2.0**, *last swept 2026-08-22 (evening)*.
+**v0.2.0**, *last swept 2026-08-22 (phase 2, first pass)*.
 
 **Read this first if you are picking up Phase 2.** The benchmark harness is
-finished and trustworthy; the next work is the playable server, and it starts
-with backups because there are none. Jump to **What is next**, then the plan at
+finished and trustworthy. The playable-server work has started: the backup
+script and the compose fixes are written and reviewed, and **none of it is on
+the box yet** - that needs a restart window. Start from the install block under
+**Phase 2**. Jump to **What is next**, then the plan at
 `~/.claude/plans/scope-out-the-simulated-sleepy-canyon.md`.
 
 If anything here disagrees with reality, reality wins and this file is stale, so
@@ -374,46 +376,85 @@ Results now say what they measured and publish themselves.
   failure the numbers park on `bench/held-*`. **There is no human step any
   more**, which is what fixed findings never reaching the page.
 
-### Phase 2, make the server playable: NEXT, and where to start
+### Phase 2, make the server playable: WRITTEN, NOT YET ON THE BOX
 
 Everything below came out of a full audit of `deploy/docker-compose.yml` on
-2026-08-22. It is what EXISTS, not speculation.
+2026-08-22. It is what EXISTS, not speculation. The code half is now done; the
+install half needs a restart window, because **Phase 2 touches the server
+players use**.
 
-**Start with backups. There are none.** The world lives in exactly one Docker
-named volume (`mc-data`, `docker-compose.yml:111`). No snapshot, no copy, no
-off-box sync. A `docker compose down -v`, a `docker volume prune`, or losing the
-VM is total unrecoverable loss. Everything else in this phase is a tuning
-question; this one is a data-loss question.
+**Backups exist now, on disk here, not on the box yet.**
 
-The agreed shape: nightly RCON `save-off` / `save-all` / tar / `save-on`, keep
-two archives on the box, ship one elsewhere. **The destination is explicitly
-temporary** - one shell function and one `BACKUP_TARGET` setting, not a design.
-Today that is a push over the tailnet to the desktop; object storage replaces it
-later. A desktop that is off means backups silently stop, so the script must
-alert through the ntfy path the box already uses when the last success is older
-than 36h, and the two local copies mean an offline desktop never leaves zero
-copies.
+| file | what it is |
+|---|---|
+| `deploy/backup.sh` | RCON `save-off` / `save-all flush` / tar / `save-on`, prune to two, rsync one off-box, alert on staleness. `--check` alerts only. |
+| `deploy/wly-backup.service` | oneshot, `EnvironmentFile=-/etc/default/wly-backup`, idle IO |
+| `deploy/wly-backup.timer` | 04:30 UTC, `Persistent=true` |
 
-**Voice chat cannot work today.** simple-voice-chat needs UDP 24454, which is
-not published, and `"25565:25565"` has no protocol suffix so Docker publishes
-**TCP only** - no UDP reaches the container at all. It fails with no server-side
-error, which is why nobody noticed. squaremap is unreachable for the same
-reason: no port published, though `wly.toml` is built around serving its tiles.
+Install, which nobody has run yet:
 
-**`VIEW_DISTANCE` and `SIMULATION_DISTANCE` are unset**, so they fall to itzg's
-defaults of 10/10 on a two-core box - while fifteen JVM flags are argued line by
-line above them. This is the cheapest TPS lever on this hardware and nobody has
-touched it. Set it once, deliberately, and write down why.
+```bash
+sudo install -m755 deploy/backup.sh /opt/deploy/backup.sh
+sudo install -m644 deploy/wly-backup.{service,timer} /etc/systemd/system/
+echo 'BACKUP_TARGET=kon@<desktop-tailnet-ip>:/backups/wly' | sudo tee /etc/default/wly-backup
+sudo systemctl daemon-reload && sudo systemctl enable --now wly-backup.timer
+sudo /opt/deploy/backup.sh          # take the first one by hand and watch it
+```
 
-Also: no `STOP_SERVER_ANNOUNCE_DELAY`, so every deploy drops players without
-warning. `itzg/minecraft-server:java25` is a **moving tag** with
-`docker compose pull` before every `up`, so the JVM can change under the server
-with no rollback lever - `WLY_IMAGE` covers `wly` only.
-`OVERRIDE_SERVER_PROPERTIES: "true"` silently reverts any hand edit on the box
-at the next restart.
+Four decisions in it worth not relitigating:
 
-**Phase 2 touches the server players use.** It needs a restart window, not a
-silent change.
+- **The tar runs inside the container** (`docker exec wly-mc tar`), not against
+  the volume path on the host, so it needs no knowledge of the compose project
+  prefix (`deploy_mc-data`) and pulls no second image.
+- **`save-on` is a trap, not a line**, so an interrupted backup never leaves the
+  server with saving disabled. That failure is silent and lasts until a restart.
+- **tar exiting non-zero is normal** on a live server ("file changed as we read
+  it"). `gzip -t` decides whether the archive is actually usable, so a routine
+  warning does not throw away a good backup and a truncated stream still fails
+  loudly.
+- **Mods, libraries, cache and logs are excluded.** They come back from
+  `PACKWIZ_URL` on the next start and they are most of the bytes.
+- **A failed rsync is not high priority; staleness is.** The desktop being off
+  is the expected case, and two local copies mean it never leaves zero. What
+  escalates is the newest archive passing 36h, which covers a failed run, a
+  timer that never fired, and a container down for a week, all the same way.
+
+**Still open on backups: nothing has ever been restored.** An untested restore
+is not a backup. The restore is `docker run --rm -v deploy_mc-data:/data -i
+alpine tar -xzf - -C /data` against a throwaway volume, and it should be done
+once on a bench box before this is called finished.
+
+**The compose audit findings are fixed, in `deploy/docker-compose.yml`:**
+
+- **Voice chat could never have worked.** `"25565:25565"` has no protocol
+  suffix, so Docker published TCP only and no UDP reached the container at all.
+  `24454/udp` is now published. It must match `port` in
+  `config/voicechat/voicechat-server.properties`; `-1` there means "reuse the
+  game port", which would need `25565/udp` published instead. The mod **is** in
+  `pack/stable`, side `both` (checked 2026-08-23), and the pack ships no config,
+  so the server wrote the mod's own default of 24454. Confirm that file on the
+  box during the restart window.
+- **squaremap is not in the pack at all.** Checked 2026-08-23: no
+  `squaremap.pw.toml` in `pack/stable/mods`. "The map is unreachable because no
+  port is published" was one layer short - there is nothing listening to reach,
+  and `wly.toml`'s `tiles_dir` is written for a mod that has never shipped. No
+  port is published for it on purpose: a socket bound to nothing would join the
+  box's ports baseline for no service. **Adding squaremap to the pack, server
+  side, is the actual task**, and the compose line follows it.
+- **`VIEW_DISTANCE` and `SIMULATION_DISTANCE` were unset**, so they sat at
+  itzg's 10/10 on a two-core box while fifteen JVM flags were argued line by
+  line above them. Now 8/6, and simulation is the lower of the two on purpose:
+  it drives what actually ticks, and `explore` showed travel saturating both
+  cores at 65ms p95. Raise them against a measured row, not a feeling.
+- **`STOP_SERVER_ANNOUNCE_DELAY: 30`**, so a deploy warns players instead of
+  dropping them mid-sentence. Well inside the 120s stop grace period.
+- **The base image is `${MC_IMAGE:-itzg/minecraft-server:java25}`.** The tag is
+  still moving and compose still pulls before every up, but there is now a
+  rollback lever that matches `WLY_IMAGE`: pin a dated tag in `.env`, no rebuild.
+
+`OVERRIDE_SERVER_PROPERTIES: "true"` is left alone deliberately: it reverts hand
+edits on the box at every restart, which is the point, since compose is meant to
+be the only source of server.properties.
 
 ### Phase 3, the frozen baseline
 
