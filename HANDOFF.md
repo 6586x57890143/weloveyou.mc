@@ -454,13 +454,13 @@ once on a bench box before this is called finished.
   game port", which would need `25565/udp` published instead. **Confirmed on the
   box 2026-08-23: `port=24454`.** The mod is in `pack/stable`, side `both`, and
   the pack ships no config, so the server wrote the mod's own default.
-- **squaremap is not in the pack at all.** Checked 2026-08-23: no
-  `squaremap.pw.toml` in `pack/stable/mods`. "The map is unreachable because no
-  port is published" was one layer short - there is nothing listening to reach,
-  and `wly.toml`'s `tiles_dir` is written for a mod that has never shipped. No
-  port is published for it on purpose: a socket bound to nothing would join the
-  box's ports baseline for no service. **Adding squaremap to the pack, server
-  side, is the actual task**, and the compose line follows it.
+- **squaremap was not in the pack at all**, which is why the map never worked.
+  "Unreachable because no port is published" was one layer short: there was
+  nothing listening to reach, and `wly.toml`'s `tiles_dir` had pointed at a mod
+  that never shipped since phase 0. Fixed on 2026-08-23 by adding it to
+  `pack/stable` v0.1.7, `side = "server"` (Modrinth declares its sides unknown,
+  so packwiz assumed universal; a client has nothing to do with server-rendered
+  tiles). The compose port followed the mod, in that order and deliberately.
 - **`VIEW_DISTANCE` and `SIMULATION_DISTANCE` were unset**, so they sat at
   itzg's 10/10 on a two-core box while fifteen JVM flags were argued line by
   line above them. Now 8/6, and simulation is the lower of the two on purpose:

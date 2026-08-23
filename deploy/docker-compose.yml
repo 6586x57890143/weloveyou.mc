@@ -130,13 +130,14 @@ services:
       # restart: `port = -1` there means "reuse the game port", which would need
       # 25565/udp published instead of this line.
       - "24454:24454/udp"
-      # NO squaremap PORT ON PURPOSE. Checked 2026-08-23: squaremap is not in
-      # pack/stable at all, so the earlier "the map is unreachable because no
-      # port is published" was one layer short - there is nothing listening to
-      # reach. wly.toml's tiles_dir is written for a mod that has not shipped.
-      # Publishing a port to nothing would add a listening socket to the box's
-      # ports baseline for no service. Add the mod first (server side), then
-      # this line, matching `port` in config/squaremap/config.yml.
+      # squaremap's own webserver. The mod landed in pack/stable v0.1.7,
+      # side "server"; before that this line was deliberately absent, because
+      # publishing a port to a mod that is not installed binds a socket to
+      # nothing and adds it to the box's ports baseline for no service.
+      # 8080 inside is squaremap's default and 8080 on the host is dozzle,
+      # hence the shift. Must match `port` under `internal-webserver` in
+      # config/squaremap/config.yml, which the mod writes on its first boot.
+      - "${MC_MAP_PORT:-8123}:8080"
       # RCON is loopback only. It is an admin channel with a shared password;
       # wly reaches it over the compose network, nothing else should.
       - "127.0.0.1:25575:25575"
