@@ -135,8 +135,10 @@ services:
       # publishing a port to a mod that is not installed binds a socket to
       # nothing and adds it to the box's ports baseline for no service.
       # 8080 inside is squaremap's default and 8080 on the host is dozzle,
-      # hence the shift. Must match `port` under `internal-webserver` in
-      # config/squaremap/config.yml, which the mod writes on its first boot.
+      # hence the shift. Verified on the box 2026-08-23: the mod writes
+      # /data/squaremap/config.yml (NOT config/squaremap/, which is where every
+      # other mod puts its config) with internal-webserver enabled, bind
+      # 0.0.0.0, port 8080, and serves 200 through this mapping.
       - "${MC_MAP_PORT:-8123}:8080"
       # RCON is loopback only. It is an admin channel with a shared password;
       # wly reaches it over the compose network, nothing else should.

@@ -461,6 +461,27 @@ once on a bench box before this is called finished.
   `pack/stable` v0.1.7, `side = "server"` (Modrinth declares its sides unknown,
   so packwiz assumed universal; a client has nothing to do with server-rendered
   tiles). The compose port followed the mod, in that order and deliberately.
+  **Verified live after the v0.2.1 deploy**: the mod writes
+  `/data/squaremap/config.yml`, not `config/squaremap/` where every other mod
+  puts its config, with `internal-webserver` enabled on `0.0.0.0:8080`; tiles
+  land in `/data/squaremap/web/tiles`, which is exactly what `wly.toml` has
+  claimed all along; and `http://100.103.121.9:8123/` answers 200.
+
+  **It also opened a port, which the health gate is built to notice.**
+  `new_ports_vs_baseline` fired on the very next snapshot, and left alone it
+  would spend a model call every six hours reporting a port we opened on
+  purpose. Reseed after any deliberate port change:
+
+  ```bash
+  sudo cp -a /opt/wly/baseline/ports /opt/wly/baseline/ports.pre-squaremap
+  sudo rm -f /opt/wly/baseline/ports          # collect.sh reseeds when absent
+  sudo /opt/wly/bin/collect.sh quick
+  sudo /opt/wly/bin/gate.sh /var/lib/wly/quick.json   # want exit 1, "quiet"
+  ```
+
+  squaremap 1.3.2 is the newest build for 1.21.1; it logs that it is "14
+  versions out of date" against 1.3.15, which targets later Minecraft. That
+  line is noise here, not an upgrade to chase.
 - **`VIEW_DISTANCE` and `SIMULATION_DISTANCE` were unset**, so they sat at
   itzg's 10/10 on a two-core box while fifteen JVM flags were argued line by
   line above them. Now 8/6, and simulation is the lower of the two on purpose:
