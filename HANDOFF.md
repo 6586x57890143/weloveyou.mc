@@ -430,12 +430,17 @@ once on a bench box before this is called finished.
   suffix, so Docker published TCP only and no UDP reached the container at all.
   `24454/udp` is now published. It must match `port` in
   `config/voicechat/voicechat-server.properties`; `-1` there means "reuse the
-  game port", which would need `25565/udp` published instead. **Unverified
-  against the running pack.**
-- **squaremap had no port published** at all, on a box whose `wly.toml` is built
-  around serving its tiles. Now `${MC_MAP_PORT:-8123}:8080`, shifted because
-  dozzle already holds host 8080. Must match `port` in
-  `config/squaremap/config.yml`. **Also unverified.**
+  game port", which would need `25565/udp` published instead. The mod **is** in
+  `pack/stable`, side `both` (checked 2026-08-23), and the pack ships no config,
+  so the server wrote the mod's own default of 24454. Confirm that file on the
+  box during the restart window.
+- **squaremap is not in the pack at all.** Checked 2026-08-23: no
+  `squaremap.pw.toml` in `pack/stable/mods`. "The map is unreachable because no
+  port is published" was one layer short - there is nothing listening to reach,
+  and `wly.toml`'s `tiles_dir` is written for a mod that has never shipped. No
+  port is published for it on purpose: a socket bound to nothing would join the
+  box's ports baseline for no service. **Adding squaremap to the pack, server
+  side, is the actual task**, and the compose line follows it.
 - **`VIEW_DISTANCE` and `SIMULATION_DISTANCE` were unset**, so they sat at
   itzg's 10/10 on a two-core box while fifteen JVM flags were argued line by
   line above them. Now 8/6, and simulation is the lower of the two on purpose:
