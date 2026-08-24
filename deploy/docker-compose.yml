@@ -213,5 +213,63 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
+  # The database. It holds exactly one fact that has no other home: which
+  # Minecraft account belongs to which Discord account. Everything else wly
+  # surfaces already has an authoritative source (the world's own stats files,
+  # RCON, pack.toml, cost.json) and is deliberately NOT copied in here.
+  #
+  # 17-alpine, pinned to a major rather than a moving tag, for the same reason
+  # MC_IMAGE is pinned: compose pulls before every up, and a database that
+  # changes major version under itself on a deploy that touched nothing is a
+  # bad afternoon.
+  #
+  # No published port. Nothing outside this compose network has any business
+  # reaching it, and the box's ports baseline would flag it if it did.
+  db:
+    image: "${DB_IMAGE:-postgres:17-alpine}"
+    container_name: wly-db
+    restart: unless-stopped
+    # Behind the same profile as wly, and for the same reason. Nothing consumes
+    # this database until the bot exists, and POSTGRES_PASSWORD is required
+    # rather than defaulted, so leaving it in the default set made `compose up`
+    # fail on every box that had not set DB_PASSWORD yet. A service that is not
+    # used yet must not be able to break a deploy that does not use it.
+    #
+    #   docker compose --profile bot up -d
+    profiles: ["bot"]
+    environment:
+      POSTGRES_DB: "${DB_NAME:-wly}"
+      POSTGRES_USER: "${DB_USER:-wly}"
+      # NOT `:?`. Compose interpolates every service in the file regardless of
+      # profile, so a required variable here failed `compose up` for anyone who
+      # had not set it, including a box that only runs Minecraft. The postgres
+      # image already refuses to initialise without a password and says exactly
+      # that, so the enforcement is kept and the collateral damage is not.
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-}"
+      # Postgres is happy to fsync less on a hobby box, but this is player
+      # identity rather than a cache, so it keeps its defaults.
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Applied on FIRST START ONLY, when the data directory is empty. An edit
+      # to schema.sql does not migrate an existing database, which is a real
+      # trap: it looks applied and is not.
+      - ./schema.sql:/docker-entrypoint-initdb.d/10-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-wly} -d ${DB_NAME:-wly}"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    # 2 cores and 11G total, most of it already spoken for by a 6G heap. This
+    # is a database for a few dozen rows, so it is capped rather than left to
+    # decide for itself how much shared memory it deserves.
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
 volumes:
   mc-data:
+  # NOT covered by deploy/backup.sh, which archives the Minecraft world only.
+  # Losing this means everyone re-links, which is annoying rather than fatal,
+  # but it wants a pg_dump beside the world tar before anything depends on it.
+  db-data:

@@ -16,6 +16,13 @@ type Live struct {
 	Channels []LiveChannel
 	Emojis   []string
 	Features []string // guild feature flags, e.g. ENHANCED_ROLE_COLORS
+	Members  []LiveMember
+
+	// MembersUnavailable explains why Members is empty, when it is empty
+	// because the read failed rather than because there are none. Silence
+	// would look identical to a clean server, which is the wrong default for
+	// a check whose whole job is noticing something bad.
+	MembersUnavailable string
 
 	// BotHighestRole is the name of the highest role the bot itself holds, and
 	// BotHighestPosition its Discord position. Everything wly manages must sit
@@ -35,6 +42,14 @@ type LiveRole struct {
 	Hoist       bool
 	Mentionable bool
 	Managed     bool // Discord owns it: a bot's own role, a boost role
+}
+
+// LiveMember is a guild member, narrowed to what the bot gate reads.
+type LiveMember struct {
+	ID    string
+	Name  string
+	Bot   bool
+	Roles []string // role names, resolved by the caller
 }
 
 type LiveChannel struct {
@@ -91,6 +106,13 @@ func (a Action) String() string {
 type Plan struct {
 	Actions []Action
 	Drift   []Action
+
+	// Warnings are findings that are neither a change to make nor drift to
+	// tolerate: something is true on the server that should not be. They are
+	// kept apart from Drift because "an undeclared channel exists" and "an
+	// application holds the role that gates the private half of the server" do
+	// not deserve the same line in the same list.
+	Warnings []string
 
 	// GradientsAvailable records whether the guild can render the declared
 	// gradients. When false they are downgraded to the flat colour rather than
@@ -158,6 +180,7 @@ func Compute(want *Guild, live Live) (*Plan, error) {
 			"present on the server, absent from guild.toml"})
 	}
 
+	checkBotsHoldingRoles(want, live, p)
 	planChannels(want, live, p)
 	planEmojis(want, live, p)
 	return p, nil
@@ -328,6 +351,12 @@ func Render(p *Plan) string {
 		b.WriteString("\nENHANCED_ROLE_COLORS is not on this guild, so gradients " +
 			"fall back to the flat colour. That is a boost level, not a bug.\n")
 	}
+	if len(p.Warnings) > 0 {
+		fmt.Fprintf(&b, "\n%d thing(s) that should not be true:\n", len(p.Warnings))
+		for _, w := range p.Warnings {
+			fmt.Fprintf(&b, "  ! %s\n", w)
+		}
+	}
 	if len(p.Drift) > 0 {
 		fmt.Fprintf(&b, "\n%d thing(s) on the server that guild.toml does not "+
 			"describe. Apply NEVER removes these:\n", len(p.Drift))
@@ -382,4 +411,46 @@ func (c Channel) Overwrites() []Overwrite {
 		out = append(out, Overwrite{Role: r, Allow: PermViewChannel})
 	}
 	return out
+}
+
+// checkBotsHoldingRoles reports any application wearing a role this file
+// manages.
+//
+// `player` gates the in-game channels and everything later is built on it, so an
+// application holding it is inside the private half of the server. MayLink stops
+// wly ever granting one; this catches a grant that came from somewhere else,
+// which on a Discord server is entirely possible: any other bot with Manage
+// Roles and a high enough position can hand out roles, including to itself.
+//
+// It reports rather than removes. Stripping a role from an application without
+// being asked is the same overreach as deleting an undeclared channel, and the
+// right response depends on which bot it is and why it is there.
+func checkBotsHoldingRoles(want *Guild, live Live, p *Plan) {
+	if live.MembersUnavailable != "" {
+		p.Warnings = append(p.Warnings, "could not check whether any application "+
+			"holds a managed role: "+live.MembersUnavailable)
+		return
+	}
+	managed := map[string]bool{}
+	for _, r := range want.Roles {
+		managed[r.Name] = true
+	}
+	for _, m := range live.Members {
+		if !m.Bot {
+			continue
+		}
+		var held []string
+		for _, r := range m.Roles {
+			if managed[r] {
+				held = append(held, r)
+			}
+		}
+		if len(held) > 0 {
+			sort.Strings(held)
+			p.Warnings = append(p.Warnings, fmt.Sprintf(
+				"the application %q holds %s. wly never grants a managed role to a "+
+					"bot, so this came from elsewhere: check which other app has "+
+					"Manage Roles", m.Name, strings.Join(held, " and ")))
+		}
+	}
 }

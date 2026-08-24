@@ -31,6 +31,12 @@ weloveyou-mc/internal/buildinfo   85
 # failure waiting for the next commit.
 weloveyou-mc/internal/discord     95
 
+# The log parser and the stats reader. The plan's own target was 95 and it is
+# the right number: a misparse here either fails to verify a real player or
+# verifies the wrong one, and the stats feed every leaderboard and playtime
+# role. Sits at 100, and the parser is fuzzed as well as covered.
+weloveyou-mc/internal/mcevents    95
+
 # Across every package. Rises as the logic-heavy packages land; the plan's
 # destination is 85.
 total                             80
