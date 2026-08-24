@@ -120,19 +120,35 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      # Every input reaches the shell as an environment variable, never as a
+      # ${{ }} interpolation inside the script. An interpolation is textual
+      # substitution BEFORE bash ever sees the line, so a workload of
+      # `x"; reboot #` would have run on the box rather than being rejected as
+      # an unknown workload. Only actors with write access can dispatch this,
+      # but it runs on self-hosted hardware, which is exactly where "only a
+      # trusted actor can trigger it" is the assumption not worth betting a box
+      # on. `only` and `shards` are free text; the rest are choice or numeric
+      # inputs today and are quoted the same way anyway, so a later edit to the
+      # input list cannot quietly reintroduce this.
       - name: run the sweep
         env:
           OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+          WORKLOAD: ${{ github.event.inputs.workload || 'both' }}
+          RUNS: ${{ github.event.inputs.runs || '3' }}
+          RADIUS: ${{ github.event.inputs.radius || '1000' }}
+          LOAD: ${{ github.event.inputs.load || '1' }}
+          ONLY: ${{ github.event.inputs.only || '' }}
+          SHARD: ${{ matrix.shard }}
         run: |
           go run ./cmd/wly bench \
-            --workload "${{ github.event.inputs.workload || 'both' }}" \
-            --runs "${{ github.event.inputs.runs || '3' }}" \
-            --radius "${{ github.event.inputs.radius || '1000' }}" \
-            --load "${{ github.event.inputs.load || '1' }}" \
-            --only "${{ github.event.inputs.only || '' }}" \
+            --workload "$WORKLOAD" \
+            --runs "$RUNS" \
+            --radius "$RADIUS" \
+            --load "$LOAD" \
+            --only "$ONLY" \
             --out "$OUT" \
             --json "${OUT%.md}.json" \
-            --shard "${{ matrix.shard }}" \
+            --shard "$SHARD" \
             --raw shard.json
 
       # Each shard hands its raw measurements to the merge job rather than

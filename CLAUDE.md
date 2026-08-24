@@ -123,11 +123,22 @@ tailnet-only box. Nothing else at the edge becomes writable.
   with heartbeats, resume and interaction routing is genuinely worth not writing.
   Every decision lives in `internal/discord` and is tested against `httptest`, so
   none of it needs a token.
-- **wly speaks the Docker Engine API over the mounted socket**, rather than shelling out to
-  `docker compose`. The image is distroless (no shell, no docker CLI), and restart, stop and
-  inspect are three endpoints over a unix socket: about forty lines with stdlib `net/http`
-  and a custom dialer. Cheaper than either fattening the image or adding the docker client
-  library. This supersedes the plan, which said `os/exec`.
+- **wly speaks the Docker Engine API**, rather than shelling out to `docker compose`.
+  The image is distroless (no shell, no docker CLI), and restart, stop and inspect are
+  three endpoints over HTTP: about forty lines with stdlib `net/http` and a custom
+  dialer. Cheaper than either fattening the image or adding the docker client library.
+  This supersedes the plan, which said `os/exec`.
+
+  **AMENDED 2026-08-24, security review: not over a mounted socket.** The bind mount was
+  removed from `deploy/docker-compose.yml`. `/var/run/docker.sock` is host-root-equivalent
+  and makes the `read_only`, `cap_drop: ALL` and `no-new-privileges` beside it decorative:
+  anything that reaches the API can start a privileged container and mount the host. No Go
+  code had used it yet, so it was mounted for nothing, and the first thing to use it would
+  have been a daemon parsing Discord input off the internet. The forty-line scope was a
+  comment, not a boundary. When that code lands it points at `tecnativa/docker-socket-proxy`
+  on the compose network with `CONTAINERS=1, POST=1`, and wly gets
+  `DOCKER_HOST=tcp://docker-proxy:2375`. Same design, same three endpoints, scope enforced
+  by something other than good intentions.
 - **The bridge tails `latest.log`** instead of using the Docker log API or a bridge mod. No
   Docker dependency for the hot path, and no mod to keep ported across MC versions.
 - **Fabric-only, so no Create.** Create Fabric stopped at 1.20.1 and the 1.21.1 port branch
@@ -143,9 +154,60 @@ tailnet-only box. Nothing else at the edge becomes writable.
 
 ## Deployment
 
-The box is an Oracle ARM VM (`weloveyou`, aarch64, 2 cores, 11G) reachable only over the
-tailnet at `100.103.121.9`. `release.yml` builds a multi-arch image, pushes it to GHCR, joins
-the tailnet with an ephemeral tagged auth key, and SSHes one command.
+The box is an Oracle ARM VM (`weloveyou`, aarch64, 2 cores, 11G) on the tailnet at
+`100.103.121.9`. `release.yml` builds a multi-arch image, pushes it to GHCR, joins the
+tailnet with an ephemeral tagged auth key, and SSHes one command.
+
+**CORRECTED 2026-08-24, verified against OCI and probed from off-tailnet: the posture is
+real, but inverted.** "Reachable only over the tailnet" was wrong in the one direction that
+matters and right about everything else.
+
+One security list (`Default Security List for gate`) is attached to the one subnet (`gate`,
+10.0.0.0/24), every instance has `nsg-ids []`, so that list is the entire cloud firewall.
+Its whole ingress is:
+
+```
+tcp  22          from 0.0.0.0/0     <-- the internet, and the only thing that is
+icmp all         from 0.0.0.0/0
+icmp all         from 10.0.0.0/24
+udp  41641       from 0.0.0.0/0     stateless, tailscale direct connections
+```
+
+Probed from a machine off the tailnet against `158.180.53.71`: **22 open, 25565, 8123 and
+24454 all filtered.** The same ports answer immediately on `100.103.121.9`. Host `iptables`
+agrees, `-i lo`, established, icmp, `NEW tcp dpt:22`, then REJECT.
+
+So the box publishes SSH to the internet and keeps the game and the map on the tailnet.
+Half of that is the plan and half of it is the bug, and they are easy to mix up:
+
+- **The game and map ports staying shut is DELIBERATE, do not "fix" it.** Players reach
+  25565 over the tailnet today. Opening it publicly waits on a domain, players will connect
+  to a subdomain rather than a bare IP, and on a judgement that the platform is ready for
+  strangers to point traffic at. Until then the closed port is the decision, not an
+  oversight. Note that DNS is not a control: an A record pointing at `158.180.53.71` does
+  nothing to who can reach it, the security list is the only gate, and behind that the
+  protections are `ONLINE_MODE` and `ENFORCE_WHITELIST` in `docker-compose.yml`.
+- **`docker-compose.yml` reads as though the ports were already public.** It publishes 25565
+  and 24454/udp and carries a long comment about the voice-chat port, none of which is
+  reachable from the internet. Those mappings are correct and are what will make the port
+  work the day the security list opens; they simply are not evidence that it is open. A
+  check run on the box (`serves 200 through this mapping`) cannot see a cloud firewall,
+  which is how the difference stayed invisible.
+- **Bench boxes inherit it.** `provision-box.sh` puts them in this same subnet with
+  `--assign-public-ip true` and seeds production's `authorized_keys` onto them, so "no
+  public SSH by convention" in that script, `add-bench-box.sh` and `bench-admin.yml` is
+  wrong. It is not convention, it is one security-list rule away in the other direction.
+
+The fix is to drop the `tcp 22 from 0.0.0.0/0` rule. Tailnet SSH does not traverse it,
+peer traffic arrives inside WireGuard over `udp 41641`, which stays. **Do not do it blind:
+if tailscale is unhealthy at that moment the box is unreachable, and recovery is the OCI
+serial console.** Confirm `tailscale status` first, keep the console to hand.
+
+Re-check with:
+
+```bash
+oci network subnet get --subnet-id "$S" --output json   # security-list-ids, nsg-ids
+```
 
 **What CI can do on that box is deliberately tiny.** The `deploy` user's key is a forced
 command (`command="/opt/deploy/deploy.sh"`, `restrict`, `from="100.64.0.0/10,fd7a:...::/48"`),
@@ -161,7 +223,12 @@ be influenced by the caller. Verified: `rm -rf /`, `deploy ../../etc/passwd` and
                              rolls back to the previous SHA if compose fails
 /opt/deploy/compose-up.sh    root half: pull --ignore-buildable, then up -d --build
 /srv/app                     the checkout, cloned via a read-only GitHub deploy key
-/srv/app/deploy/.env         secrets. gitignored, so `git checkout --force` never touches it.
+/srv/app/deploy/.env         secrets, mode 600. gitignored, so `git checkout --force`
+                             never touches it. The mode is not asserted by anything, so
+                             check it rather than assume it: `stat -c %a` on the box. It
+                             holds RCON_PASSWORD and, from the guild reconciler on,
+                             WLY_DISCORD_TOKEN, and every user in the `docker` group can
+                             already read the container's environment regardless.
 ```
 
 `MC_IMAGE` is the same lever for the Minecraft image. `itzg/minecraft-server:java25` is a
