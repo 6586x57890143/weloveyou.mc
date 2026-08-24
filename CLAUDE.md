@@ -39,6 +39,9 @@ say which plan it belongs to.
 ## Commands
 
 ```bash
+go run ./cmd/wly guild                    # diff guild.toml against the real server
+go run ./cmd/wly guild --apply            # ... and make the changes
+
 go run ./cmd/wly bench --dry-run          # preflight only, measures nothing
 go run ./cmd/wly bench --only j25-g1-coh --workload pack --runs 1
 
@@ -72,8 +75,10 @@ cmd/wly/            server daemon, bench harness today; bot, log bridge and RCON
 cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
 internal/bench/     JVM flag profiles, workload driver, result table
-internal/discord/   testdata/surfaces/ only: the Components V2 payloads, which are both
-                    the design mockups and the golden files. NO GO YET, by design.
+internal/discord/   PURE: guild.toml parsing and the reconciler diff. No HTTP, no
+                    token, no gateway, so the code that decides to change a live
+                    community is testable without one. testdata/surfaces/ holds the
+                    Components V2 payloads, which are both mockup and golden file.
 
 PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
@@ -112,6 +117,12 @@ tailnet-only box. Nothing else at the edge becomes writable.
 
 ## Decisions worth not relitigating
 
+- **The guild reconciler speaks Discord's REST API with stdlib `net/http`**, for the
+  same reason as the Docker decision below: it is eleven plain JSON endpoints behind
+  one header, and `disgo` earns its place when the gateway does, because a websocket
+  with heartbeats, resume and interaction routing is genuinely worth not writing.
+  Every decision lives in `internal/discord` and is tested against `httptest`, so
+  none of it needs a token.
 - **wly speaks the Docker Engine API over the mounted socket**, rather than shelling out to
   `docker compose`. The image is distroless (no shell, no docker CLI), and restart, stop and
   inspect are three endpoints over a unix socket: about forty lines with stdlib `net/http`

@@ -15,10 +15,21 @@
 # tested against a replayed log. The gate got stricter overall - the package
 # holding the logic is at 98 - while the package holding the I/O got thinner and
 # less coverable. That is the trade being recorded, not a red build made green.
-weloveyou-mc/cmd/wly              30
+# Raised from 30 when the guild reconciler landed. The REST layer is testable
+# against httptest in a way the docker shell-out never was, so the package
+# earned it: 54.1 measured the CI way, with docker off PATH. Kept well short of
+# that number on purpose, because D2 adds more thin I/O and a floor you land
+# exactly on is a failure waiting for the next commit.
+weloveyou-mc/cmd/wly              45
 weloveyou-mc/cmd/wlyup            70
 weloveyou-mc/internal/bench       99
 weloveyou-mc/internal/buildinfo   85
+
+# The guild reconciler decides what happens to a live community's roles and
+# channels, so it is held to the same 95 as the other pure packages. It sits at
+# 98.6; the floor keeps margin deliberately, because landing on the number is a
+# failure waiting for the next commit.
+weloveyou-mc/internal/discord     95
 
 # Across every package. Rises as the logic-heavy packages land; the plan's
 # destination is 85.
