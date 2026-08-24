@@ -17,10 +17,26 @@
 -- with the first, and the first is authoritative. The database answers exactly
 -- one question: whose Minecraft account is this?
 --
--- BACKUPS. deploy/backup.sh archives the Minecraft world and nothing else, so
--- this database is currently NOT backed up. Losing it means everyone re-links,
--- which is annoying rather than fatal, but it should be a pg_dump beside the
--- world tar before anyone depends on it.
+-- BACKUPS, AND THE ONE FLAG THAT MAKES THEM RESTORABLE.
+--
+-- The dump MUST be taken with `pg_dump --clean --if-exists`. Rehearsed against
+-- postgres:17-alpine on 2026-08-24, and a plain dump does not survive:
+--
+--   plain dump  -> restore onto a fresh volume -> ERROR: relation
+--                  "link_requests" already exists, psql exits 3
+--   --clean     -> restore onto the same database -> exit 0, no errors
+--
+-- The reason is this file. It runs from /docker-entrypoint-initdb.d, so a FRESH
+-- volume always has these tables before a restore begins, and a dump that only
+-- knows how to CREATE them collides with itself. --clean --if-exists makes the
+-- dump self-sufficient: it drops first, so it restores over an initialised
+-- database and into an empty one alike. Both were rehearsed.
+--
+-- What the rehearsal actually checked, because a restore that returns rows
+-- without their constraints is worse than one that fails: after restoring,
+-- inserting a second player row with an already-taken mc_uuid still fails with
+-- players_mc_uuid_key. The uniqueness that makes one account belong to one
+-- person survives the round trip.
 
 CREATE TABLE IF NOT EXISTS players (
     discord_id   TEXT        PRIMARY KEY,
