@@ -229,6 +229,17 @@ mapping, which was true from the box and irrelevant from the internet.
 
 ### Traps that cost real time
 
+**A compose profile does not gate interpolation.** Adding a `db` service with
+`POSTGRES_PASSWORD: "${DB_PASSWORD:?...}"` broke `docker compose up -d` on every
+box that had not set it, including one that only runs Minecraft. Putting the
+service behind `profiles: ["bot"]` did NOT fix it: compose interpolates every
+service in the file regardless of profile, so a required variable anywhere fails
+the whole parse. The fix is `${DB_PASSWORD:-}` and letting the postgres image
+refuse to initialise without a password, which it does with a clear message, at
+the moment someone actually starts it. Second time in one day the same principle
+bit, after the same argument was made for not putting a `:?` on
+`WLY_DISCORD_TOKEN`.
+
 **A merged branch still accepts pushes.** Four times in one session, work was
 pushed to a branch whose PR had already been squash-merged, and it silently went
 nowhere: the commits look fine, `git log` looks fine, and the content is simply
