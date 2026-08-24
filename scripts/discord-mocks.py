@@ -24,6 +24,7 @@ import json
 import mimetypes
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 from brand import BRAND_CSS, PALETTE, title
@@ -39,6 +40,15 @@ SURFACES = ROOT / "internal" / "discord" / "testdata" / "surfaces"
 # media whose basename matches is inlined as a data URI. Unset (which is how CI
 # runs) draws the placeholder instead, which is honest rather than broken.
 ASSETS = None
+
+# Interactions a surface is allowed to reference. An undeclared custom_id is a
+# button that does nothing when pressed, which is worse than an absent one
+# because a player has already committed to it by the time they find out.
+try:
+    _GUILD = tomllib.loads((ROOT / "guild.toml").read_text(encoding="utf-8"))
+    DECLARED_IDS = set(_GUILD.get("interactions", {}).get("buttons", []))
+except (OSError, tomllib.TOMLDecodeError):
+    DECLARED_IDS = set()
 
 # Components V2, as of the current Discord component reference. Every number
 # here is a limit the API enforces, not a style preference.
@@ -129,9 +139,14 @@ def validate(payload, label):
                     "must be a Button or a Thumbnail")
 
         elif t == BUTTON:
-            if c.get("custom_id"):
-                err(f"button {c.get('label')!r} has a custom_id, which commits the bot "
-                    "to an interaction handler; use a link button (style 5) in a design pass")
+            cid = c.get("custom_id")
+            if cid and cid not in DECLARED_IDS:
+                err(f"button {c.get('label')!r} uses custom_id {cid!r}, which "
+                    "guild.toml's [interactions] does not declare. An undeclared id "
+                    "is a button that does nothing when pressed")
+            if cid and c.get("style") == 5:
+                err(f"button {c.get('label')!r} is a link button with a custom_id; "
+                    "Discord accepts one or the other, never both")
             if c.get("style") == 5 and not c.get("url"):
                 err(f"link button {c.get('label')!r} has no url")
 
@@ -328,6 +343,8 @@ pre{background:var(--dc-code);border:1px solid #2E3035;border-radius:4px;
 .btn{background:#4E5058;color:#fff;border-radius:3px;padding:.42rem .75rem;
  font-size:14px;font-weight:500;display:inline-flex;align-items:center;gap:.35rem}
 .btn .ext{color:#C4C9CE;font-size:11px}
+/* Discord blurple: an action the bot handles, not a link out. */
+.btn.primary{background:#5865F2}
 footer{color:var(--dim);margin-top:2.5rem;font-size:13px}
 """
 
@@ -389,7 +406,8 @@ def render(c):
 
     if t == BUTTON:
         ext = '<span class="ext">&#8599;</span>' if c.get("style") == 5 else ""
-        return '<div class="btn">%s%s</div>' % (html.escape(c.get("label", "")), ext)
+        cls = "btn primary" if c.get("style") == 1 else "btn"
+        return '<div class="%s">%s%s</div>' % (cls, html.escape(c.get("label", "")), ext)
 
     if t == FILE:
         return '<div class="thumb">file</div>'

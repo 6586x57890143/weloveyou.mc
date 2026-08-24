@@ -4,7 +4,7 @@
     "direction": "b",
     "title": "Card",
     "status": "chosen 2026-08-24",
-    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. Custom guild emoji carry the mark. No pitch: it is an interface, so it says what to do and nothing about why the server is nice. The screenshot is real now, recoloured to the palette and published from the pack repo."
+    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. A regular player types no commands at all: step 3 is a button that opens a modal, and the join attempt itself is the proof."
   },
   "flags": 32768,
   "components": [
@@ -26,14 +26,14 @@
           "components": [
             {
               "type": 10,
-              "content": "### 1. get prism launcher\nthe pack only auto-updates in prism."
+              "content": "### 3. link and join\npress the button, give your minecraft name, then connect. your first join is what proves it is you.\n```\n158.180.53.71\n```"
             }
           ],
           "accessory": {
             "type": 2,
-            "style": 5,
-            "label": "Download",
-            "url": "https://prismlauncher.org/download/"
+            "style": 1,
+            "label": "link my account",
+            "custom_id": "link_start"
           }
         },
         {
@@ -67,14 +67,14 @@
           "components": [
             {
               "type": 10,
-              "content": "### 3. launch, then join\nthe first launch pulls the pack down. post `/whitelist add <your name>` here, then connect:\n```\n158.180.53.71\n```"
+              "content": "### 3. link and join\npress the button, give your minecraft name, then connect. your first join is what proves it is you.\n```\n158.180.53.71\n```"
             }
           ],
           "accessory": {
             "type": 2,
-            "style": 5,
-            "label": "pack page",
-            "url": "https://weloveyou-pack.pages.dev/pack/stable/"
+            "style": 1,
+            "label": "link my account",
+            "custom_id": "link_start"
           }
         },
         {
