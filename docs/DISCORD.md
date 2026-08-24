@@ -96,7 +96,7 @@ the same failure as a JVM flag the JVM accepts and then ignores.
 | pack version, index hash, MC, loader | `pack.toml`, and **`bench.Pack` already parses all four** (`internal/bench/pack.go`) | yes, reuse it |
 | players online | RCON `list` | yes |
 | TPS / MSPT | spark, which **answers on a worker thread, so RCON returns nothing and the numbers land in `latest.log`** | yes, via the log tail |
-| uptime | Docker Engine API inspect over the mounted socket | yes |
+| uptime | Docker Engine API inspect, via the socket proxy (see CLAUDE.md) | yes |
 | world day | RCON `time query day` | yes |
 | map link and tiles | squaremap, `/data/squaremap/web/tiles` | yes, verified live 2026-08-23 |
 | spend, MTD, currency | `/var/lib/wly/cost.json` | yes |

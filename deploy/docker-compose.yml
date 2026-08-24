@@ -202,9 +202,29 @@ services:
       # Read-only: wly tails latest.log and reads squaremap's tiles. It has no
       # business writing into the server's data directory.
       - mc-data:/mc:ro
-      # Lifecycle control. wly speaks the Docker Engine API over this socket
-      # directly, the image is distroless and has no docker CLI to shell out to.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # REMOVED 2026-08-24, security review. This was
+      #   - /var/run/docker.sock:/var/run/docker.sock
+      # for lifecycle control: wly speaks the Docker Engine API over the socket
+      # directly, the image being distroless with no docker CLI to shell out to.
+      #
+      # The socket is host-root-equivalent, which makes read_only, cap_drop and
+      # no-new-privileges above decorative: anything that reaches the Docker API
+      # can start a privileged container and mount the host. No Go code uses it
+      # yet - restart/stop/inspect are still unwritten - so today it bought
+      # nothing and risked everything, and it would have been mounted for the
+      # first time under a daemon parsing Discord input from the internet.
+      #
+      # When that code lands it points at a socket proxy on the compose network,
+      # not at this file:
+      #
+      #   docker-proxy:
+      #     image: tecnativa/docker-socket-proxy
+      #     environment: { CONTAINERS: 1, POST: 1 }
+      #     volumes: [ /var/run/docker.sock:/var/run/docker.sock:ro ]
+      #
+      # and wly gets DOCKER_HOST=tcp://docker-proxy:2375. That keeps the design
+      # (three endpoints over HTTP) and makes the forty-line scope enforced by
+      # something other than a comment.
 
     mem_limit: 512m
     pids_limit: 128

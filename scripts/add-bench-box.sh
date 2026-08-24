@@ -16,8 +16,16 @@
 #      converting an A2 to A1 afterwards works.
 #   2. Waits for the box to join the tailnet. Provisioning installs the
 #      tailscale package but does not authenticate it, so this needs
-#      TS_AUTHKEY, and a REUSABLE one: an ephemeral key deletes the node the
-#      moment it goes offline, and a bench box is offline most of the time.
+#      TS_AUTHKEY, and a ONE-OFF, NON-EPHEMERAL one. Those are independent
+#      properties and this script used to demand the wrong pair: ephemeral
+#      deletes the NODE when it goes offline, which is wrong for a box that is
+#      offline most of the time, but that is no argument for a REUSABLE key,
+#      which is what it asked for until 2026-08-24. The key is substituted into
+#      cloud-init user-data and is therefore readable from the instance
+#      metadata endpoint by anything running on the box, the CI runner
+#      included. A one-off key is spent the moment the box uses it; a reusable
+#      one is a standing tag:ci tailnet identity for whoever reads it, which is
+#      exactly what provision-box.sh's own comment forbids.
 #   3. Installs the GitHub runner with the `bench` label, which is what makes
 #      the box eligible for a shard.
 #   4. Quietens the box. Ubuntu's apt-daily timers are Persistent=true, so a
@@ -37,17 +45,23 @@ PROD="${PROD_HOST:-ubuntu@100.103.121.9}"
 KEY="${SSH_KEY:-$HOME/.ssh/oracle-weloveyou}"
 REPO="${REPO:-6586x57890143/weloveyou.mc}"
 
-: "${TS_AUTHKEY:?set TS_AUTHKEY to a REUSABLE tailscale auth key}"
+: "${TS_AUTHKEY:?set TS_AUTHKEY to a ONE-OFF, NON-EPHEMERAL tailscale auth key}"
 command -v gh >/dev/null || { echo "::error::gh is not on PATH"; exit 1; }
 
-ssh_prod() { ssh -i "$KEY" -o StrictHostKeyChecking=no "$PROD" "$@"; }
+# accept-new, not no: TOFU on first contact and a real failure if production's
+# host key ever changes under us. Costs nothing over the tailnet and keeps the
+# one host worth being fussy about honest.
+ssh_prod() { ssh -i "$KEY" -o StrictHostKeyChecking=accept-new "$PROD" "$@"; }
 
 echo "==> provisioning $NAME ($OCPUS ocpu / ${MEM}GB)"
 # TS_PROVISION_KEY reaches provision-box.sh so cloud-init can join the tailnet
 # at first boot. Without it the box comes up unreachable: no public SSH by
 # convention, not on the tailnet, and no runner yet to reach it through. That is
 # what happened to bench-2 and bench-3, which had to be registered by hand.
-ssh_prod "TS_PROVISION_KEY='$TS_AUTHKEY' /opt/deploy/provision-box.sh '$NAME' '$OCPUS' '$MEM'"
+# The key goes over stdin, not in the command line: an argv assignment is
+# visible in the remote box's process list for as long as the launch runs, and
+# lands in whatever shell history the forced command leaves behind.
+printf '%s\n' "$TS_AUTHKEY" | ssh_prod "read -r TS_PROVISION_KEY; export TS_PROVISION_KEY; /opt/deploy/provision-box.sh '$NAME' '$OCPUS' '$MEM'"
 
 echo "==> waiting for $NAME on the tailnet"
 ip=""
@@ -68,6 +82,9 @@ EOF
 fi
 echo "    $NAME is $ip"
 
+# no, not accept-new: this box was created a minute ago and has a host key
+# nothing has ever seen, so there is nothing to trust on first use. The tailnet
+# is what authenticates the route here.
 run_on_box() { ssh -i "$KEY" -o StrictHostKeyChecking=no "ubuntu@$ip" "$@"; }
 
 echo "==> registering a runner labelled 'bench'"

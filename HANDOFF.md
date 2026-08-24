@@ -210,6 +210,23 @@ bugs: port 22 is open to `0.0.0.0` on a box whose design is tailnet-only, and
 dozzle, a container log viewer, is published on `0.0.0.0:8080`. Both were
 already in the old ports baseline, so neither is newly hidden.
 
+**UPDATED 2026-08-24, both halves checked properly.** The port 22 half is worse
+than recorded and the dozzle half is no longer true.
+
+- **22 really is open to the internet**, confirmed at the OCI security list and
+  by probing `158.180.53.71` from off-tailnet. It is the ONLY port that answers
+  there. 25565, 8123 and 24454 are all filtered, so players are reaching the
+  server over the tailnet and the public IP serves nothing but SSH. See the
+  Deployment section of CLAUDE.md for the full ingress and the fix.
+- **dozzle is not on `0.0.0.0` any more.** `ss -lntp` shows it bound to
+  `100.103.121.9:8080`, the tailnet address. squaremap on 8123 is still bound to
+  `0.0.0.0`, but the security list filters it, so the exposure is a host-level
+  bind rather than a reachable port.
+
+The trap worth keeping: **a check run ON the box cannot see the cloud firewall.**
+`docker-compose.yml` records squaremap as verified serving 200 through its port
+mapping, which was true from the box and irrelevant from the internet.
+
 ### Traps that cost real time
 
 **A merged branch still accepts pushes.** Four times in one session, work was
