@@ -158,3 +158,74 @@ func CanRequest(discordID, uuid string, reqs []Request, existing []Link, now tim
 	}
 	return LinkOK
 }
+
+// Actor is whoever triggered an interaction, narrowed to what the gate reads.
+//
+// Discord puts a `bot` flag on the user object of every interaction, so this is
+// information we are handed rather than something to infer.
+type Actor struct {
+	ID     string
+	Bot    bool // an application, not a person
+	System bool // Discord's own system account
+}
+
+// GateState is why an actor was refused, or that it was not.
+type GateState int
+
+const (
+	GateOK GateState = iota
+	GateIsBot
+	GateIsSystem
+	GateNoActor
+)
+
+var gateReasons = map[GateState]string{
+	GateOK:       "allowed",
+	GateIsBot:    "applications do not get player access",
+	GateIsSystem: "system accounts do not get player access",
+	GateNoActor:  "the interaction carried no user",
+}
+
+func (s GateState) String() string {
+	if r, ok := gateReasons[s]; ok {
+		return r
+	}
+	return fmt.Sprintf("gatestate(%d)", int(s))
+}
+
+// MayLink is the bot gate: who is allowed to start a link at all.
+//
+// An application must never obtain `player`. The role gates the in-game
+// channels and is the thing every later grant is built on, so a bot that could
+// award it to itself would be inside the server's private half and holding the
+// identity of whatever Minecraft account it named. Nothing about the link flow
+// requires a bot to use it, so the whole class is refused rather than reasoned
+// about case by case.
+//
+// This is cheap because Discord tells us. It is not a heuristic on the name,
+// the avatar or the behaviour, all of which are forgeable; `bot` is set by
+// Discord on the interaction payload and an application cannot clear it.
+//
+// A missing actor is refused too. An interaction with no user is malformed, and
+// the safe reading of a malformed request for access is no.
+func MayLink(a Actor) GateState {
+	switch {
+	case strings.TrimSpace(a.ID) == "":
+		return GateNoActor
+	case a.Bot:
+		return GateIsBot
+	case a.System:
+		return GateIsSystem
+	}
+	return GateOK
+}
+
+// GrantableTo is the same rule applied at the other end: whatever the link
+// table says, a managed role is never put on an application.
+//
+// Two checks rather than one, deliberately. MayLink stops a bot starting a
+// link; this stops a role reaching one by any other route, including a row
+// written before this gate existed, a hand-edited database, or a future code
+// path that forgets to ask. The expensive half of a security check is knowing
+// where it was skipped, so it is applied at the point of the grant as well.
+func GrantableTo(a Actor) GateState { return MayLink(a) }

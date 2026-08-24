@@ -57,7 +57,13 @@ func guildRoutes() map[string]string {
 		// Two calls on purpose: @me is not a snowflake on the GET member route,
 		// so the bot has to learn its own id first. Verified against the live
 		// API, which returns 400 NUMBER_TYPE_COERCE for the @me form.
-		"/users/@me":                 `{"id":"botuser"}`,
+		"/users/@me": `{"id":"botuser"}`,
+		// The bot itself, plus a person. Neither holds a declared role, so a
+		// clean run produces no warnings.
+		"/guilds/42/members": `[
+			{"roles":["9"],"user":{"id":"botuser","username":"wly","bot":true}},
+			{"roles":["3"],"user":{"id":"kon","username":"kon"}}
+		]`,
 		"/guilds/42/members/botuser": `{"roles":["9","3"]}`,
 	}
 }
@@ -393,5 +399,43 @@ func TestApplyReportsRefusedReorderAndContinues(t *testing.T) {
 	// It carried on: the channel work happened after the failed reorder.
 	if !strings.Contains(got, "created channel general") {
 		t.Errorf("apply stopped at the reorder:\n%s", got)
+	}
+}
+
+// An application wearing a role this file manages is inside the private half of
+// the server. wly never grants one, so it came from elsewhere, and the whole
+// point of the check is that it says so.
+func TestPlanWarnsAboutABotHoldingAManagedRole(t *testing.T) {
+	routes := guildRoutes()
+	routes["/guilds/42/members"] = `[
+		{"roles":["3"],"user":{"id":"evil","username":"RoleGrabber","bot":true}}
+	]`
+	fakeDiscord(t, routes)
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42")}, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	if !strings.Contains(got, "RoleGrabber") || !strings.Contains(got, "should not be true") {
+		t.Errorf("no warning about a bot holding player:\n%s", got)
+	}
+}
+
+// The member read is optional. Losing it costs the warning, not the reconcile,
+// and going quiet would look identical to a clean server.
+func TestMissingMembersWarnsButDoesNotAbort(t *testing.T) {
+	routes := guildRoutes()
+	delete(routes, "/guilds/42/members")
+	fakeDiscord(t, routes)
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42")}, &out); err != nil {
+		t.Fatalf("a failed member read must not abort the plan: %v", err)
+	}
+	if !strings.Contains(out.String(), "could not check whether any application") {
+		t.Errorf("silently skipped the bot check:\n%s", out.String())
 	}
 }

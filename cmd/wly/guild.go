@@ -111,6 +111,11 @@ type apiEmoji struct {
 
 type apiMember struct {
 	Roles []string `json:"roles"`
+	User  struct {
+		ID       string `json:"id"`
+		Username string `json:"username"`
+		Bot      bool   `json:"bot"`
+	} `json:"user"`
 }
 
 // fetchLive assembles the narrowed view internal/discord reconciles against.
@@ -187,6 +192,30 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 	if err := c.do("GET", "/guilds/"+guildID+"/members/"+self.ID, nil, &me); err != nil {
 		return live, err
 	}
+	// Members, so the bot gate can report an application already wearing a
+	// managed role. Needs the Server Members privileged intent, which is on.
+	// A failure here is NOT fatal: it costs the warning, not the reconcile, and
+	// refusing to plan because one optional read failed would be worse than
+	// planning without it. The plan says so rather than going quiet.
+	var members []apiMember
+	if err := c.do("GET", "/guilds/"+guildID+"/members?limit=1000", nil, &members); err != nil {
+		live.MembersUnavailable = err.Error()
+	} else {
+		roleName := map[string]string{}
+		for _, r := range roles {
+			roleName[r.ID] = r.Name
+		}
+		for _, m := range members {
+			lm := discord.LiveMember{ID: m.User.ID, Name: m.User.Username, Bot: m.User.Bot}
+			for _, id := range m.Roles {
+				if n, ok := roleName[id]; ok {
+					lm.Roles = append(lm.Roles, n)
+				}
+			}
+			live.Members = append(live.Members, lm)
+		}
+	}
+
 	best := -1
 	for _, id := range me.Roles {
 		if r, ok := byID[id]; ok && r.Position > best {

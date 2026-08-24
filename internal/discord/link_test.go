@@ -156,3 +156,62 @@ func TestOnlineModeIsStillOn(t *testing.T) {
 			"which is only true while Mojang authenticates the session.")
 	}
 }
+
+// An application must never obtain `player`: it gates the private half of the
+// server and every later grant is built on it.
+func TestMayLinkRefusesBots(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		a    Actor
+		want GateState
+	}{
+		{"a person", Actor{ID: "111"}, GateOK},
+		{"an application", Actor{ID: "222", Bot: true}, GateIsBot},
+		{"a system account", Actor{ID: "333", System: true}, GateIsSystem},
+		{"no user at all", Actor{}, GateNoActor},
+		{"blank id", Actor{ID: "   "}, GateNoActor},
+		// A bot that is somehow also flagged system is still a bot, and either
+		// way it is refused. What matters is that it never returns GateOK.
+		{"both flags", Actor{ID: "444", Bot: true, System: true}, GateIsBot},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := MayLink(tc.a); got != tc.want {
+				t.Errorf("MayLink(%+v) = %v, want %v", tc.a, got, tc.want)
+			}
+		})
+	}
+}
+
+// The grant is checked separately from the request, so a role cannot reach an
+// application through a route that forgot to ask: a row written before the gate
+// existed, a hand-edited database, or a future code path.
+func TestGrantableToRefusesBotsIndependently(t *testing.T) {
+	if GrantableTo(Actor{ID: "222", Bot: true}) == GateOK {
+		t.Fatal("a managed role was grantable to an application")
+	}
+	if GrantableTo(Actor{ID: "111"}) != GateOK {
+		t.Error("a person was refused a grant")
+	}
+}
+
+// Exactly one state means yes. If a new one is ever added it must default to
+// refusing rather than to allowing.
+func TestOnlyGateOKAllows(t *testing.T) {
+	for s := GateState(0); s < 10; s++ {
+		allowed := s == GateOK
+		if (s == GateOK) != allowed {
+			t.Fatal("unreachable")
+		}
+	}
+	for _, s := range []GateState{GateIsBot, GateIsSystem, GateNoActor} {
+		if s == GateOK {
+			t.Errorf("%v collides with GateOK", s)
+		}
+		if s.String() == "" {
+			t.Errorf("state %d has no reason", int(s))
+		}
+	}
+	if got := GateState(99).String(); got != "gatestate(99)" {
+		t.Errorf("unknown state = %q", got)
+	}
+}

@@ -335,3 +335,54 @@ func TestRealOpsChannelIsPrivate(t *testing.T) {
 	}
 	t.Fatal("no ops channel in guild.toml")
 }
+
+// wly never grants a managed role to an application, but any other bot with
+// Manage Roles can. `player` gates the private half of the server, so one
+// wearing it is inside, and the reconciler has to say so.
+func TestComputeWarnsAboutBotsHoldingManagedRoles(t *testing.T) {
+	live := liveMatching()
+	live.Members = []LiveMember{
+		{ID: "1", Name: "kon", Roles: []string{"player", "admin"}},
+		{ID: "2", Name: "SomeOtherBot", Bot: true, Roles: []string{"player", "supporter"}},
+		{ID: "3", Name: "HarmlessBot", Bot: true, Roles: []string{"undeclared-role"}},
+	}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one about SomeOtherBot", p.Warnings)
+	}
+	w := p.Warnings[0]
+	for _, want := range []string{"SomeOtherBot", "player", "supporter", "Manage Roles"} {
+		if !strings.Contains(w, want) {
+			t.Errorf("warning does not mention %q: %s", want, w)
+		}
+	}
+	// A human holding the roles is the entire point and must never warn.
+	if strings.Contains(w, "kon") {
+		t.Errorf("warned about a person: %s", w)
+	}
+	// It reports, it does not act. Stripping a role unasked is the same
+	// overreach as deleting an undeclared channel.
+	for _, a := range p.Actions {
+		if strings.Contains(a.Target, "SomeOtherBot") {
+			t.Errorf("planned an action against a bot: %v", a)
+		}
+	}
+	if !strings.Contains(Render(p), "should not be true") {
+		t.Errorf("render does not surface the warning:\n%s", Render(p))
+	}
+}
+
+func TestNoWarningsOnACleanServer(t *testing.T) {
+	live := liveMatching()
+	live.Members = []LiveMember{{ID: "1", Name: "kon", Roles: []string{"player"}}}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Warnings) != 0 {
+		t.Errorf("warnings on a clean server: %v", p.Warnings)
+	}
+}
