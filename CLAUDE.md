@@ -188,6 +188,29 @@ the container, `save-on` from a trap, keep two archives on the box, rsync one to
   often off; two local copies mean that is not an incident. The newest archive passing 36h
   is, and it catches a failed run, a timer that never fired, and a dead container alike.
 
+**The link database is dumped beside the world, not inside it.** `wly-db` gets its own
+`pg_dump` to `db-<stamp>.sql.gz`, pruned, shipped and staleness-checked exactly like the
+world archive. Three things that are not obvious:
+
+- **It needs no save dance.** `pg_dump` takes its own consistent snapshot, which is the
+  whole reason it is a dump rather than a tar of the volume. Copying a live Postgres data
+  directory file by file produces the same torn result `save-off` exists to prevent.
+- **A missing `wly-db` is not a failure, a failed dump is.** The service does not exist
+  until the bot ships, so the script says so and moves on. Once the container is running,
+  both a failed dump and a stale one escalate to high, because unlike the world there is
+  no second copy of this anywhere and no way to rebuild it.
+- **Losing it is not cosmetic.** Every player has to re-link their Discord account by
+  hand, and nothing in the world archive can reconstruct that mapping.
+- **The dump is self-sufficient, and that is deliberate.** It is taken with
+  `--clean --if-exists`, so it drops before it creates and restores cleanly over a volume
+  that has already run `schema.sql` from initdb. That is the normal case, not a corner
+  one: a fresh volume always runs `schema.sql`, so a plain dump would fail halfway through
+  the restore, at exactly the hour you would rather it did not.
+  **Verified 2026-08-24** on the box against `postgres:17-alpine`: seed two rows, dump,
+  drop and recreate the table the way initdb would, restore, `ON_ERROR_STOP=1` exit 0 and
+  both rows back. What that does NOT cover is the full compose path with a real `db-data`
+  volume, so treat it as the mechanics proven and the drill still owed.
+
 `BACKUP_TARGET` is one setting and deliberately temporary, not a design. Object storage
 replaces the desktop later and nothing else changes.
 
