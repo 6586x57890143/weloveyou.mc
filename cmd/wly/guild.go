@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -170,14 +171,27 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 
 	// The bot's own highest role. Without this the hierarchy check cannot run,
 	// and the hierarchy check is the one that stops a plan that silently no-ops.
+	//
+	// Two calls, because `@me` is not a snowflake here. GET
+	// /guilds/{id}/members/@me returns 400 NUMBER_TYPE_COERCE: only PATCH takes
+	// @me on that route, and the GET form that does take it,
+	// /users/@me/guilds/{id}/member, needs the guilds.members.read OAuth2 scope
+	// that a bot token does not carry. So: ask who we are, then look ourselves up.
+	var self struct {
+		ID string `json:"id"`
+	}
+	if err := c.do("GET", "/users/@me", nil, &self); err != nil {
+		return live, err
+	}
 	var me apiMember
-	if err := c.do("GET", "/guilds/"+guildID+"/members/@me", nil, &me); err != nil {
+	if err := c.do("GET", "/guilds/"+guildID+"/members/"+self.ID, nil, &me); err != nil {
 		return live, err
 	}
 	best := -1
 	for _, id := range me.Roles {
 		if r, ok := byID[id]; ok && r.Position > best {
 			best, live.BotHighestRole = r.Position, r.Name
+			live.BotHighestPosition = r.Position
 		}
 	}
 	return live, nil
@@ -233,8 +247,11 @@ func runGuild(args []string, out io.Writer) error {
 		}
 		return nil
 	}
-	return fmt.Errorf("--apply is not implemented yet: plan against the real server " +
-		"first and read what it says before anything writes")
+	if plan.Empty() {
+		return nil
+	}
+	fmt.Fprintln(out, "\napplying:")
+	return newDiscordClient(token).applyPlan(want, live, plan, out)
 }
 
 // fromEnvFile reads one key out of a compose .env file.
@@ -273,4 +290,162 @@ func fromEnvFile(path, key string) string {
 		return val
 	}
 	return ""
+}
+
+// applyPlan performs the plan. It creates and updates; it never deletes, which
+// is enforced upstream by drift being a separate field on the Plan that this
+// function cannot see.
+//
+// Order matters and is not the order the plan prints in:
+//  1. roles, because a channel's permission overwrites name them
+//  2. role positions, because Discord puts every new role at the bottom and the
+//     hierarchy is guild.toml's order, not creation order
+//  3. categories, because channels reference them by id
+//  4. channels, with their overwrites resolved from the role ids created in 1
+func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discord.Plan, out io.Writer) error {
+	roleID := map[string]string{discord.Everyone: g.Meta.ID} // @everyone's id IS the guild id
+	for _, r := range live.Roles {
+		roleID[r.Name] = r.ID
+	}
+	chanID := map[string]string{}
+	catID := map[string]string{}
+	for _, ch := range live.Channels {
+		chanID[ch.Name] = ch.ID
+	}
+
+	todo := map[discord.Kind]map[string]bool{}
+	for _, a := range p.Actions {
+		if todo[a.Kind] == nil {
+			todo[a.Kind] = map[string]bool{}
+		}
+		todo[a.Kind][a.Target] = true
+	}
+
+	// 1. roles
+	for _, r := range g.Roles {
+		if !todo[discord.CreateRole][r.Name] {
+			continue
+		}
+		colour, _ := discord.ParseColor(r.Color)
+		body := map[string]any{"name": r.Name, "color": colour,
+			"hoist": r.Hoist, "mentionable": r.Mentionable}
+		if r.Colors != nil && p.GradientsAvailable {
+			cols := map[string]any{}
+			for k, v := range map[string]string{"primary_color": r.Colors.Primary,
+				"secondary_color": r.Colors.Secondary, "tertiary_color": r.Colors.Tertiary} {
+				if v == "" {
+					continue
+				}
+				n, _ := discord.ParseColor(v)
+				cols[k] = n
+			}
+			body["colors"] = cols
+		}
+		var created apiRole
+		if err := c.do("POST", "/guilds/"+g.Meta.ID+"/roles", body, &created); err != nil {
+			return fmt.Errorf("create role %s: %w", r.Name, err)
+		}
+		roleID[r.Name] = created.ID
+		fmt.Fprintf(out, "  created role %s\n", r.Name)
+	}
+
+	// 2. hierarchy. guild.toml is highest first, and Discord's position is
+	// higher-is-higher, so the first declared role gets the largest number. The
+	// bot's own role must stay above all of them, so counting starts below it.
+	var positions []map[string]any
+	top := live.BotHighestPosition - 1
+	if top < len(g.Roles) {
+		fmt.Fprintf(out, "  ! not setting role order: the bot's %q role is at position %d, "+
+			"which leaves no room for %d roles below it. Drag it to the top of "+
+			"Server Settings -> Roles and re-run.\n",
+			live.BotHighestRole, live.BotHighestPosition, len(g.Roles))
+	} else {
+		for i, r := range g.Roles {
+			if id, ok := roleID[r.Name]; ok {
+				positions = append(positions, map[string]any{"id": id, "position": top - i})
+			}
+		}
+	}
+	if len(positions) > 0 {
+		if err := c.do("PATCH", "/guilds/"+g.Meta.ID+"/roles", positions, nil); err != nil {
+			// Not fatal: the roles exist and are usable, the order is cosmetic
+			// until something is gated on it. Say so rather than unwinding.
+			fmt.Fprintf(out, "  ! could not set role order: %v\n", err)
+		} else {
+			fmt.Fprintln(out, "  set role order from guild.toml")
+		}
+	}
+
+	// 3. categories
+	for _, ch := range live.Channels {
+		if ch.Category != "" {
+			catID[ch.Category] = "" // filled below only for ones we create
+		}
+	}
+	for _, cat := range g.Categories() {
+		if !todo[discord.CreateCategory][cat] {
+			continue
+		}
+		var created apiChannel
+		body := map[string]any{"name": cat, "type": 4}
+		if err := c.do("POST", "/guilds/"+g.Meta.ID+"/channels", body, &created); err != nil {
+			return fmt.Errorf("create category %s: %w", cat, err)
+		}
+		catID[cat] = created.ID
+		fmt.Fprintf(out, "  created category %s\n", cat)
+	}
+
+	// 4. channels
+	for _, ch := range g.Channels {
+		overwrites := []map[string]any{}
+		for _, o := range ch.Overwrites() {
+			id, ok := roleID[o.Role]
+			if !ok {
+				return fmt.Errorf("channel %s names role %q, which has no id", ch.Name, o.Role)
+			}
+			overwrites = append(overwrites, map[string]any{
+				"id": id, "type": 0,
+				"allow": strconv.FormatInt(o.Allow, 10),
+				"deny":  strconv.FormatInt(o.Deny, 10),
+			})
+		}
+
+		if todo[discord.CreateChannel][ch.Name] {
+			body := map[string]any{"name": ch.Name, "type": 0, "topic": ch.Topic}
+			if id := catID[ch.Category]; id != "" {
+				body["parent_id"] = id
+			}
+			if len(overwrites) > 0 {
+				body["permission_overwrites"] = overwrites
+			}
+			var created apiChannel
+			if err := c.do("POST", "/guilds/"+g.Meta.ID+"/channels", body, &created); err != nil {
+				return fmt.Errorf("create channel %s: %w", ch.Name, err)
+			}
+			chanID[ch.Name] = created.ID
+			fmt.Fprintf(out, "  created channel %s\n", ch.Name)
+			continue
+		}
+
+		if todo[discord.UpdateChannel][ch.Name] {
+			body := map[string]any{"topic": ch.Topic}
+			if id := catID[ch.Category]; id != "" {
+				body["parent_id"] = id
+			}
+			if len(overwrites) > 0 {
+				body["permission_overwrites"] = overwrites
+			}
+			if err := c.do("PATCH", "/channels/"+chanID[ch.Name], body, nil); err != nil {
+				return fmt.Errorf("update channel %s: %w", ch.Name, err)
+			}
+			fmt.Fprintf(out, "  updated channel %s\n", ch.Name)
+		}
+	}
+
+	if n := len(todo[discord.UploadEmoji]); n > 0 {
+		fmt.Fprintf(out, "\n  %d emoji NOT uploaded. The icon grids live in\n"+
+			"  scripts/pixelicons.py and Go cannot read them yet; sharing them and\n"+
+			"  encoding a PNG is the next commit. Nothing above depended on it.\n", n)
+	}
+	return nil
 }

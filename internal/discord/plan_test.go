@@ -269,3 +269,69 @@ func TestActionString(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestChannelOverwrites(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ch   Channel
+		want []Overwrite
+	}{
+		{"open channel has none", Channel{Name: "general"}, nil},
+		{"readonly denies send to everyone", Channel{Name: "a", ReadOnly: true},
+			[]Overwrite{{Role: Everyone, Deny: PermSendMessages}}},
+		{"private denies view to everyone and grants it back",
+			Channel{Name: "ops", VisibleTo: []string{"admin"}},
+			[]Overwrite{
+				{Role: Everyone, Deny: PermViewChannel},
+				{Role: "admin", Allow: PermViewChannel},
+			}},
+		{"private and readonly denies both, grants only view",
+			Channel{Name: "feed", ReadOnly: true, VisibleTo: []string{"player"}},
+			[]Overwrite{
+				{Role: Everyone, Deny: PermViewChannel | PermSendMessages},
+				{Role: "player", Allow: PermViewChannel},
+			}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.ch.Overwrites()
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Errorf("overwrite %d = %+v, want %+v", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+}
+
+// The bit that matters most: a role allowed to see a readonly channel must not
+// also gain the ability to post in it.
+func TestOverwritesNeverGrantSendBack(t *testing.T) {
+	for _, o := range (Channel{ReadOnly: true, VisibleTo: []string{"player"}}).Overwrites() {
+		if o.Allow&PermSendMessages != 0 {
+			t.Fatalf("%s was granted send in a readonly channel", o.Role)
+		}
+	}
+}
+
+// #ops carries spend and health. If this ever stops producing a deny, that
+// channel is public.
+func TestRealOpsChannelIsPrivate(t *testing.T) {
+	g, err := Load("../../guild.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range g.Channels {
+		if c.Name != "ops" {
+			continue
+		}
+		ow := c.Overwrites()
+		if len(ow) == 0 || ow[0].Role != Everyone || ow[0].Deny&PermViewChannel == 0 {
+			t.Fatalf("ops is not private: %+v", ow)
+		}
+		return
+	}
+	t.Fatal("no ops channel in guild.toml")
+}

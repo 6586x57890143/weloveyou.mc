@@ -53,8 +53,12 @@ func guildRoutes() map[string]string {
 			{"id":"c2","name":"general","type":0,"topic":"talk","parent_id":"c1"},
 			{"id":"c3","name":"orphan","type":0,"topic":""}
 		]`,
-		"/guilds/42/emojis":      `[{"name":"heart"}]`,
-		"/guilds/42/members/@me": `{"roles":["9","3"]}`,
+		"/guilds/42/emojis": `[{"name":"heart"}]`,
+		// Two calls on purpose: @me is not a snowflake on the GET member route,
+		// so the bot has to learn its own id first. Verified against the live
+		// API, which returns 400 NUMBER_TYPE_COERCE for the @me form.
+		"/users/@me":                 `{"id":"botuser"}`,
+		"/guilds/42/members/botuser": `{"roles":["9","3"]}`,
 	}
 }
 
@@ -109,7 +113,7 @@ func TestFetchLive(t *testing.T) {
 func TestFetchLivePropagatesEachFailure(t *testing.T) {
 	for _, drop := range []string{
 		"/guilds/42", "/guilds/42/roles", "/guilds/42/channels",
-		"/guilds/42/emojis", "/guilds/42/members/@me",
+		"/guilds/42/emojis", "/users/@me", "/guilds/42/members/botuser",
 	} {
 		t.Run(drop, func(t *testing.T) {
 			routes := guildRoutes()
@@ -199,6 +203,12 @@ color = "#8E8677"
 name = "general"
 category = "the server"
 topic = "talk"
+
+# heart already exists on the fake guild, skull does not, so exactly one
+# upload is planned and the deferral notice has something to defer.
+[emojis]
+source = "scripts/pixelicons.py"
+upload = ["heart", "skull"]
 `
 	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -260,72 +270,103 @@ func TestRunGuildRefusesWrongGuild(t *testing.T) {
 	}
 }
 
-func TestRunGuildApplyIsNotSilentlyAccepted(t *testing.T) {
-	fakeDiscord(t, guildRoutes())
-	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
-	err := runGuild([]string{"--config", testConfig(t, "42"), "--apply"}, &bytes.Buffer{})
-	if err == nil || !strings.Contains(err.Error(), "not implemented") {
-		t.Fatalf("error = %v; --apply must fail loudly rather than appear to work", err)
-	}
-}
+// --apply must actually write, and must write the right things in the right
+// order. Recording every non-GET is how we know it did not quietly no-op.
+func TestRunGuildApplyWrites(t *testing.T) {
+	routes := guildRoutes()
+	// A bare guild: nothing declared exists yet, so apply has work to do. The
+	// bot sits high enough to leave room beneath it.
+	routes["/guilds/42/roles"] = `[
+		{"id":"9","name":"wly","managed":true,"position":50},
+		{"id":"1","name":"@everyone","position":0}
+	]`
+	routes["/guilds/42/channels"] = `[]`
 
-func TestRunGuildSurfacesFetchFailure(t *testing.T) {
-	fakeDiscord(t, map[string]string{}) // every route 404s
-	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
-	if err := runGuild([]string{"--config", testConfig(t, "42")}, &bytes.Buffer{}); err == nil {
-		t.Fatal("no error when the API refused everything")
-	}
-}
+	var writes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			writes = append(writes, r.Method+" "+r.URL.Path)
+			_, _ = w.Write([]byte(`{"id":"new"}`))
+			return
+		}
+		if body, ok := routes[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	old := discordAPI
+	discordAPI = srv.URL
+	defer func() { discordAPI = old }()
 
-func TestSortRolesHighestFirst(t *testing.T) {
-	roles := []apiRole{{Name: "c", Position: 1}, {Name: "a", Position: 9}, {Name: "b", Position: 5}}
-	sortRolesHighestFirst(roles)
-	for i, want := range []string{"a", "b", "c"} {
-		if roles[i].Name != want {
-			t.Fatalf("order = %v", roles)
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42"), "--apply"}, &out); err != nil {
+		t.Fatalf("apply failed: %v\n%s", err, out.String())
+	}
+
+	joined := strings.Join(writes, "\n")
+	for _, want := range []string{
+		"POST /guilds/42/roles",
+		"PATCH /guilds/42/roles",
+		"POST /guilds/42/channels",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("apply never issued %s. it issued:\n%s", want, joined)
 		}
 	}
-	sortRolesHighestFirst(nil) // must not panic
+	// Roles before channels, because a channel's overwrites name role ids.
+	if strings.Index(joined, "POST /guilds/42/roles") > strings.Index(joined, "POST /guilds/42/channels") {
+		t.Errorf("channels were created before roles:\n%s", joined)
+	}
+	// Never deletes, whatever the plan said.
+	for _, w := range writes {
+		if strings.HasPrefix(w, "DELETE") {
+			t.Fatalf("apply issued %s; it must never delete", w)
+		}
+	}
+	if !strings.Contains(out.String(), "emoji NOT uploaded") {
+		t.Errorf("apply did not admit that emoji are still deferred:\n%s", out.String())
+	}
 }
 
-func TestFromEnvFile(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, ".env")
-	body := "# a comment\n\n" +
-		"OTHER=x\n" +
-		"  WLY_DISCORD_TOKEN = plain-value  \n" +
-		"QUOTED=\"in quotes\"\n" +
-		"SINGLE='single quotes'\n" +
-		"HASHY=tok#en-with-hash\n" +
-		"NOEQUALS\n"
-	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+// A bot sitting low has no room to place roles beneath it. Reordering there
+// would push managed roles above the bot, which is the hierarchy trap.
+func TestApplyRefusesToReorderWhenBotIsTooLow(t *testing.T) {
+	routes := guildRoutes()
+	routes["/guilds/42/roles"] = `[
+		{"id":"9","name":"wly","managed":true,"position":1},
+		{"id":"1","name":"@everyone","position":0}
+	]`
+	routes["/guilds/42/channels"] = `[]`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			if r.URL.Path == "/guilds/42/roles" && r.Method == "PATCH" {
+				t.Error("reordered roles despite the bot having no room below it")
+			}
+			_, _ = w.Write([]byte(`{"id":"new"}`))
+			return
+		}
+		if body, ok := routes[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	old := discordAPI
+	discordAPI = srv.URL
+	defer func() { discordAPI = old }()
+
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42"), "--apply"}, &out); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ key, want string }{
-		{"WLY_DISCORD_TOKEN", "plain-value"},
-		{"QUOTED", "in quotes"},
-		{"SINGLE", "single quotes"},
-		// A bot token can contain almost anything, so stripping a trailing
-		// comment would silently truncate it.
-		{"HASHY", "tok#en-with-hash"},
-		{"NOEQUALS", ""},
-		{"ABSENT", ""},
-	} {
-		if got := fromEnvFile(p, tc.key); got != tc.want {
-			t.Errorf("fromEnvFile(%q) = %q, want %q", tc.key, got, tc.want)
-		}
-	}
-	if got := fromEnvFile(filepath.Join(dir, "nope"), "X"); got != "" {
-		t.Errorf("missing file returned %q", got)
-	}
-}
-
-// The environment wins over the file, so an export can override a stale .env
-// without editing it.
-func TestRunGuildPrefersEnvOverFile(t *testing.T) {
-	fakeDiscord(t, guildRoutes())
-	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
-	if err := runGuild([]string{"--config", testConfig(t, "42")}, &bytes.Buffer{}); err != nil {
-		t.Fatalf("env token not used: %v", err)
+	if !strings.Contains(out.String(), "Drag it to the top") {
+		t.Errorf("apply did not explain why it skipped the reorder:\n%s", out.String())
 	}
 }

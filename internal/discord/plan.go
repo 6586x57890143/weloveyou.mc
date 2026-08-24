@@ -17,9 +17,14 @@ type Live struct {
 	Emojis   []string
 	Features []string // guild feature flags, e.g. ENHANCED_ROLE_COLORS
 
-	// BotHighestRole is the name of the highest role the bot itself holds.
-	// Everything wly manages must sit strictly below it.
-	BotHighestRole string
+	// BotHighestRole is the name of the highest role the bot itself holds, and
+	// BotHighestPosition its Discord position. Everything wly manages must sit
+	// strictly below it, and the reorder counts down from this rather than from
+	// the number of declared roles: counting from the top would place them ABOVE
+	// the bot on a server where nobody moved it, which is the exact hierarchy
+	// trap the planner refuses to plan around.
+	BotHighestRole     string
+	BotHighestPosition int
 }
 
 type LiveRole struct {
@@ -330,4 +335,50 @@ func Render(p *Plan) string {
 		}
 	}
 	return b.String()
+}
+
+// Discord permission bits, only the two this needs. Named because 1<<10 in a
+// call site is unreadable and one bit wrong here is a channel exposed.
+const (
+	PermViewChannel  int64 = 1 << 10
+	PermSendMessages int64 = 1 << 11
+)
+
+// Everyone is the @everyone role. Discord gives it the guild's own id, which
+// the caller substitutes; naming it here keeps that trick out of the API layer.
+const Everyone = "@everyone"
+
+// Overwrite is one permission overwrite, by role name rather than id, because
+// ids do not exist until the roles do.
+type Overwrite struct {
+	Role  string
+	Allow int64
+	Deny  int64
+}
+
+// Overwrites is what a channel's visibility and readonly flags mean in
+// permission bits.
+//
+// This is pure on purpose. A channel declared visible_to ["admin"] that gets
+// created without these is readable by everyone, and #ops carries spend and
+// health. Getting it wrong is not a cosmetic bug, so it is decided here where
+// it is tested, not inline in an HTTP call.
+func (c Channel) Overwrites() []Overwrite {
+	var out []Overwrite
+	deny := int64(0)
+	if len(c.VisibleTo) > 0 {
+		deny |= PermViewChannel
+	}
+	if c.ReadOnly {
+		deny |= PermSendMessages
+	}
+	if deny != 0 {
+		out = append(out, Overwrite{Role: Everyone, Deny: deny})
+	}
+	for _, r := range c.VisibleTo {
+		// Granted the view back, but NOT send: a readonly channel stays readonly
+		// for the roles that can see it, which is the point of a pinned surface.
+		out = append(out, Overwrite{Role: r, Allow: PermViewChannel})
+	}
+	return out
 }
