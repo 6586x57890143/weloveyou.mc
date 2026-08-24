@@ -22,6 +22,13 @@ import json
 import pathlib
 import sys
 
+# Shared with discord-mocks.py. Both run as `python scripts/<name>.py`, so
+# scripts/ is already on sys.path.
+# `bar` here would collide with this file's own bar-chart helper.
+from brand import BRAND_CSS, PALETTE, title
+from brand import bar as brandbar
+from pixelicons import svg as icon
+
 # One glyph means "no value", everywhere. There used to be three: a literal
 # ", " left behind when commit a08b9f8 swapped em dashes for plain punctuation
 # and caught these placeholders, a "-" for chunk counts on tick workloads, and
@@ -44,13 +51,7 @@ EMPTY = "-"
 # the moment a cell wraps or the viewport narrows, and a table that only lines
 # up at one width is worse than one that never pretended to.
 CSS = """
-:root{
- --bg:#211F1B; --panel:#282621; --rule:#3B372F; --rule-hi:#564E42;
- --fg:#D5CEC1; --fg-hi:#EFE9DC; --dim:#8E8677;
- --win:#8FA860; --lose:#C4705C; --base:#D8A657; --info:#84A69C;
- --heart:#E39AAE;
- --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
-}
+""" + PALETTE + """
 *{box-sizing:border-box}
 html{background:var(--bg)}
 body{margin:0;padding:2.5rem 1.5rem 4rem;background:var(--bg);color:var(--fg);
@@ -72,15 +73,7 @@ code{font-family:var(--mono)}
 /* Frame. The corner glyphs are real characters; the run between them is a
    repeated dash clipped by overflow, so it fits any width exactly. */
 .hrule{border-top:1px solid var(--rule-hi)}
-.bar-row{display:flex;align-items:baseline;gap:1ch;padding-bottom:.5rem}
-.bar-row .t{flex:1 1 auto;display:flex;align-items:baseline;gap:.9ch;flex-wrap:wrap}
-.bar-row .d{color:var(--dim);letter-spacing:.04em}
-/* The server is called weloveyou. The heart belongs on the page, not only in
-   the browser tab, so the name carries it and the pink is a real token. */
-.brand{color:var(--heart);font-size:19px;font-weight:600;letter-spacing:.02em}
-.brand .hb{font-size:16px}
-.wordmark{color:var(--dim);letter-spacing:.14em;text-transform:uppercase;font-size:13px}
-footer .hb{color:var(--heart)}
+""" + BRAND_CSS + """
 
 h2{font-size:15px;font-weight:600;margin:2.25rem 0 .4rem;color:var(--fg-hi);
  letter-spacing:.1em;text-transform:uppercase;display:flex;align-items:center;gap:.7rem}
@@ -192,73 +185,8 @@ CAVEATS = [
     "finished, which is a gap rather than a score of zero.",
 ]
 
-# Pixel icons, 8x8 because that is exactly how big a head is in a Minecraft
-# skin file. Drawn as inline SVG rects rather than an emoji or an image: the
-# page ships as one self-contained file with no external assets, and a run of
-# same-coloured pixels collapses into a single rect, so each of these costs a
-# few hundred bytes.
-ICON_PALETTE = {
-    "h": "#3A2A16",  # hair
-    "s": "#B58868",  # skin
-    "p": "#C8A882",  # villager skin, paler
-    "n": "#A97B57",  # that nose
-    "w": "#E8E8E8",  # eye white
-    "b": "#3A5FCD",  # eye
-    "m": "#6E4A32",  # mouth
-    "f": "#7A7A7A",  # machine frame
-    "d": "#3A3A3A",  # machine interior
-    "g": "#D8A657",  # a lit panel
-    "G": "#6A8F3C",  # grass
-    "D": "#79553A",  # dirt
-}
-
-ICONS = {
-    # Steve, more or less: hair, eyes, a suggestion of a mouth.
-    "player": [
-        "hhhhhhhh",
-        "hhhhhhhh",
-        "hssssssh",
-        "swbssbws",
-        "ssssssss",
-        "sssmmsss",
-        "ssssssss",
-        "ssssssss",
-    ],
-    # The villager is all brow and nose, which is the whole joke.
-    "villager": [
-        "hhhhhhhh",
-        "hhhhhhhh",
-        "pppppppp",
-        "pwpnnpwp",
-        "pppnnppp",
-        "pppnnppp",
-        "pppnnppp",
-        "pppppppp",
-    ],
-    # A machine: metal frame, lit face.
-    "machines": [
-        "ffffffff",
-        "fddddddf",
-        "fdggggdf",
-        "fdgddgdf",
-        "fdgddgdf",
-        "fdggggdf",
-        "fddddddf",
-        "ffffffff",
-    ],
-    # Grass on dirt, for the worldgen workloads.
-    "world": [
-        "GGGGGGGG",
-        "GGGGGGGG",
-        "DGDDGDDG",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-    ],
-}
-
+# The 8x8 pixel icon set moved to scripts/pixelicons.py, because the Discord
+# surfaces need the same icons and a second copy would have drifted.
 # Which icon fronts which workload. Unknown workloads get none rather than a
 # wrong one.
 WORKLOAD_ICONS = {
@@ -268,27 +196,6 @@ WORKLOAD_ICONS = {
     "village": "villager",
     "machines": "machines",
 }
-
-
-def icon(name):
-    """One 8x8 pixel icon as inline SVG, runs of colour collapsed into rects."""
-    rows = ICONS.get(name)
-    if not rows:
-        return ""
-    rects = []
-    for y, row in enumerate(rows):
-        x = 0
-        while x < len(row):
-            run = 1
-            while x + run < len(row) and row[x + run] == row[x]:
-                run += 1
-            if fill := ICON_PALETTE.get(row[x]):
-                rects.append(f'<rect x="{x}" y="{y}" width="{run}" height="1" fill="{fill}"/>')
-            x += run
-    return (
-        '<svg class="icon" viewBox="0 0 8 8" width="20" height="20" '
-        'aria-hidden="true" focusable="false">' + "".join(rects) + "</svg>"
-    )
 
 
 BASELINE = "baseline-j21"
@@ -370,17 +277,6 @@ def lead(key, value):
         f'<span class="k">{html.escape(key)}</span>'
         '<span class="d"></span>'
         f'<span class="v">{value}</span></div>'
-    )
-
-
-def frame(title, subtitle, right):
-    """The header block: the name and its heart, then what the page is."""
-    return (
-        '<div class="bar-row"><span class="t">'
-        f'<span class="brand">{html.escape(title)} <span class="hb">💖</span></span>'
-        f'<span class="wordmark">{html.escape(subtitle)}</span></span>'
-        f'<span class="d">{html.escape(right)}</span></div>'
-        '<div class="hrule"></div>' 
     )
 
 
@@ -579,11 +475,7 @@ def render(doc, screening=None):
 
     parts = ["<main>"]
     parts.append(
-        frame(
-            "weloveyou",
-            "JVM benchmarks",
-            (primary.get("generated") or "")[:10] or "no data",
-        )
+        brandbar("JVM benchmarks", (primary.get("generated") or "")[:10] or "no data")
     )
 
     if not (has_confirmed or has_screening):
@@ -628,7 +520,7 @@ def render(doc, screening=None):
         '<html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         '<meta name="color-scheme" content="dark">'
-        "<title>weloveyou \U0001f496 JVM benchmarks</title>"
+        "<title>wly \U0001f496 JVM benchmarks</title>"
         f"<style>{CSS}</style></head><body>\n{body}\n</body></html>\n"
     )
 

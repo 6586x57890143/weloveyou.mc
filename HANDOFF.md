@@ -1,14 +1,21 @@
 # Handoff 💖
 
 Notes for whoever picks this up next, including future me. Current as of
-**v0.2.0**, *last swept 2026-08-22 (phase 2, first pass)*.
+**v0.2.1**, *last swept 2026-08-24*.
 
-**Read this first if you are picking up Phase 2.** The benchmark harness is
-finished and trustworthy. The playable-server work has started: the backup
-script and the compose fixes are written and reviewed, and **none of it is on
-the box yet** - that needs a restart window. Start from the install block under
-**Phase 2**. Jump to **What is next**, then the plan at
-`~/.claude/plans/scope-out-the-simulated-sleepy-canyon.md`.
+**Phase numbers in this repo are ambiguous unless you say which plan.** The
+master plan (`we-re-planning-a-highly-mutable-wirth.md`) numbers 0-9; the
+2026-08-22 reframe (`scope-out-the-simulated-sleepy-canyon.md`) renumbers 1-5
+over the same ground. Both are live. CLAUDE.md's status line uses the master's.
+
+**Read this first if you are picking this up now.** The benchmark harness is
+finished and trustworthy, and the playable-server work is done and on the box.
+Two tracks remain and they do not block each other:
+
+- **The Discord layer** (master phase 2, now broken into D0-D5) is where the
+  work currently is. Start at [docs/DISCORD.md](docs/DISCORD.md).
+- **The frozen baseline** (reframe phase 3) is one three-hour measurement that
+  nobody has run yet. See **Phase 3** below.
 
 If anything here disagrees with reality, reality wins and this file is stale, so
 check the live state with the commands below before believing it.
@@ -166,8 +173,9 @@ and it is the same gap twice over.
 | `/opt/deploy/bench-power.sh` | start/stop one bench box, `BENCH_NAME=` selects it | **no** |
 | `/opt/deploy/provision-box.sh` | new bench boxes | yes, `deploy/provision-box.sh` |
 | `/opt/deploy/bench-reaper.sh` | stops idle bench boxes | yes, `deploy/bench-reaper.sh` |
-| `/opt/wly/bin/collect.sh`, `triage.sh`, `notify.sh` | the ntfy ops stack | **no** |
+| `/opt/wly/bin/collect.sh`, `notify.sh` | the ntfy ops stack | **no** |
 | `/opt/wly/bin/gate.sh` | decides whether triage wakes the model | yes, `deploy/wly-health-gate.sh` |
+| `/opt/wly/bin/triage.sh` | asks the model for a verdict, pushes at MEDIUM+ | yes, `deploy/wly-triage.sh` |
 
 Timers on the production box: `wly-health` every 6h (gated), `wly-secaudit`
 daily, `wly-cost` daily 06:30, `wly-bench-reaper` every 10min,
@@ -440,10 +448,15 @@ Four decisions in it worth not relitigating:
   escalates is the newest archive passing 36h, which covers a failed run, a
   timer that never fired, and a container down for a week, all the same way.
 
-**Still open on backups: nothing has ever been restored.** An untested restore
-is not a backup. The restore is `docker run --rm -v deploy_mc-data:/data -i
-alpine tar -xzf - -C /data` against a throwaway volume, and it should be done
-once on a bench box before this is called finished.
+**SUPERSEDED 2026-08-23: the restore has now been done**, into a throwaway
+volume, and the exact command is in the block above. What was written, and why
+it still matters:
+
+> **Still open on backups: nothing has ever been restored.** An untested restore
+> is not a backup.
+
+That remains the standard. What is still open is narrower and is stated above:
+`BACKUP_TARGET` is empty, so there are two copies on the box and none off it.
 
 **The compose audit findings are fixed, in `deploy/docker-compose.yml`:**
 
@@ -508,6 +521,34 @@ into `jvm-profiles.toml` as the single source compose reads, and `PRODUCTION.md`
 records exact versions. You cannot freeze a baseline you have not measured; after
 that, the profile changes only for a reproducible crash, a correctness bug, a
 real gameplay problem, or a measured regression. Not for 1-3%.
+
+### The Discord layer, master phase 2: IN PROGRESS
+
+The design pass, D0. No Go, by design - the master plan puts the layouts before
+the bot so the layout work is not thrown away. What landed:
+
+| file | what it is |
+|---|---|
+| `docs/DISCORD.md` | the reference: limits, colour system, data sources, perk sheet, the Activity |
+| `internal/discord/testdata/surfaces/*.json` | the surfaces, as real Components V2 payloads. Mockup and golden file are the same artifact. |
+| `scripts/discord-mocks.py` | renders them into one comparable page, and validates against the API's limits while it does |
+| `guild.toml` | the Discord server declared. Design only; the reconciler is D1. |
+
+**The mockup is the payload**, so a design cannot promise a layout Components V2
+refuses to build. `ci.yml` runs the validator on every PR for the same reason it
+runs `bench-site.py`: nothing else would, until it failed somewhere expensive.
+
+Three things found while designing it that are worth knowing before D1:
+
+- **Minecraft already writes the leaderboard.** `world/stats/<uuid>.json` and
+  `world/advancements/<uuid>.json` carry playtime, deaths, distance and blocks
+  per player, and `wly` already mounts `mc-data:/mc:ro`. There is no stats
+  pipeline to build; `internal/mcevents` only needs the realtime half.
+  **Unverified on the box** - confirm the directory is populated first.
+- **Linked roles cap at 5 metadata keys**, and the design spends all five
+  (playtime, joined, donor, first-joined, deaths). A sixth gate replaces one.
+- **Components V2's flag is irreversible per message.** The status board is
+  edited in place forever, so that is a one-way door on its first post.
 
 ### Phases 4 and 5
 

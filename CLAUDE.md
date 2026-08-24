@@ -21,13 +21,20 @@ afternoon. This file is the day-to-day reference, that one gets you oriented.
 Two Go binaries and one Cloudflare Worker. Plan lives at
 `~/.claude/plans/we-re-planning-a-highly-mutable-wirth.md`.
 
-**Status: phases 0, 1, 2 and 3 done.** Server is live and joinable, pack publishes to
-Cloudflare Pages. Phase 2 was "make the server playable", not the Discord design passes:
-backups (`deploy/backup.sh`, installed and restored once on 2026-08-23) and the compose
-audit fixes. The pack development loop lives in `weloveyou-pack`
-as `scripts/pack-dev.sh`.
+**Status, in the MASTER plan's numbering (`we-re-planning-a-highly-mutable-wirth.md`):
+0, 1 and 3 are done, and 2 is in progress.** Server is live and joinable, pack publishes
+to Cloudflare Pages. The pack development loop lives in `weloveyou-pack` as
+`scripts/pack-dev.sh`.
 
-*Last swept 2026-08-22.* See **Keeping these docs honest** at the end.
+**Two plans number the same ground differently and it has already misled a reader.**
+`scope-out-the-simulated-sleepy-canyon.md` (the 2026-08-22 reframe) renumbers 1-5 over
+phases the master plan calls 1-6. Its "phase 2, make the server playable" - backups
+(`deploy/backup.sh`, installed and restored once on 2026-08-23) plus the compose audit
+fixes - is DONE, and is a different thing from the master plan's phase 2, the Discord
+design passes, which is what is in progress now. When a phase number appears anywhere,
+say which plan it belongs to.
+
+*Last swept 2026-08-24.* See **Keeping these docs honest** at the end.
 
 ## Commands
 
@@ -42,6 +49,9 @@ gofmt -l cmd internal              # must print nothing
 
 scripts/coverage.sh                # enforce .coverage-floors, the CI gate
 scripts/coverage.sh --report       # same table, always exit 0
+
+python scripts/discord-mocks.py --check              # Components V2 payloads are valid
+python scripts/discord-mocks.py --out /tmp/m.html    # render them for review
 
 go run ./cmd/wly version
 go run ./cmd/wlyup version
@@ -62,6 +72,8 @@ cmd/wly/            server daemon, bench harness today; bot, log bridge and RCON
 cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
 internal/bench/     JVM flag profiles, workload driver, result table
+internal/discord/   testdata/surfaces/ only: the Components V2 payloads, which are both
+                    the design mockups and the golden files. NO GO YET, by design.
 
 PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
@@ -71,8 +83,14 @@ worker/             Cloudflare Worker, read-only
 deploy/             Dockerfile for wly, docker-compose.yml for mc + wly,
                     backup.sh + wly-backup.{service,timer}, and the copies of the
                     box-side scripts that are reviewable (provision-box, bench-reaper,
-                    wly-health-gate)
-scripts/            CI helpers that must also run by hand
+                    wly-health-gate, wly-triage)
+scripts/            CI helpers that must also run by hand. brand.py holds the visual
+                    identity (palette, heart, header) and pixelicons.py the 8x8 icon
+                    set; bench-site.py and discord-mocks.py both import them, so the
+                    pages cannot drift apart. weloveyou-pack's pack-site.py carries a
+                    copy of the palette and a comment naming brand.py as the source.
+docs/               DISCORD.md, the design reference for the bot half
+guild.toml          the Discord server, declared. DESIGN ONLY, no reconciler yet
 ```
 
 **Dependencies point inward.** `internal/packwiz` and `internal/mcevents` are pure: no
@@ -84,6 +102,13 @@ Cloudflare Pages and the map from squaremap's own webserver, so nothing was left
 storage to do. `WLY_R2_*` still passes through compose and nothing consumes it. The rule the
 Worker existed to encode survives and still applies if R2 ever returns: read-only at the
 edge, no authenticated write path.
+
+**PARTIALLY REVERSED, planned (phase D5, see `docs/DISCORD.md`): the Worker returns for one
+job.** The supporter payment rail (Lemon Squeezy or Polar) is webhook-driven and this box has
+no inbound path by design, so a Worker verifies the HMAC signature and writes an entitlement
+to KV, which `wly` polls. That is one signed write path at the edge and a deliberate
+relaxation of the rule above, taken because the alternative is opening a public port on a
+tailnet-only box. Nothing else at the edge becomes writable.
 
 ## Decisions worth not relitigating
 

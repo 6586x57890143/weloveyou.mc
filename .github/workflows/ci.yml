@@ -81,6 +81,18 @@ jobs:
           python scripts/bench-site.py --out "$RUNNER_TEMP/site"
           test -s "$RUNNER_TEMP/site/index.html"
 
+      # Same reasoning, one layer earlier: a Discord payload that renders here
+      # and 400s at the API is a design that was never buildable. The validator
+      # enforces the Components V2 limits, so a surface cannot go over budget or
+      # grow a Section child unnoticed.
+      - name: the Discord surfaces must be valid Components V2
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          python scripts/discord-mocks.py --check
+          python scripts/discord-mocks.py --out "$RUNNER_TEMP/mocks.html"
+          test -s "$RUNNER_TEMP/mocks.html"
+
   vuln:
     name: govulncheck
     runs-on: ubuntu-latest

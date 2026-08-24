@@ -1,0 +1,72 @@
+{
+  "_meta": {
+    "surface": "getstarted",
+    "direction": "c",
+    "title": "Ledger",
+    "note": "One dense container, every fact a key/value row, the disclosure promoted to its own titled block rather than small print. Most informative, least warm.",
+    "status": "not chosen, old voice"
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 14916270,
+      "components": [
+        {
+          "type": 10,
+          "content": "## ♥ we love you · get started"
+        },
+        {
+          "type": 10,
+          "content": "```\nlauncher ··················· Prism Launcher\ninstance ··················· weloveyou-stable.zip\naddress ···················· 158.180.53.71\nminecraft ·················· 1.21.1\nloader ····················· fabric 0.19.3\npack ······················· v0.1.7 (e6a6dffdf2ec)\nentries ···················· 71 · 143 mods server-side\nmemory ····················· 4G default, 8G machine floor\naccess ····················· whitelist, ask below\n```"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 10,
+          "content": "**install** → `Add Instance` → `Import from zip` → the URL below\n**launch** → the pre-launch step syncs the pack, every time\n**join** → `/whitelist add <your minecraft name>`, then connect\n**update** → nothing. A pack release lands on your next launch."
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 2
+        },
+        {
+          "type": 10,
+          "content": "### what the pre-launch command does\nPrism runs this before every launch, and importing the instance is what agrees to it:\n```\n$INST_JAVA -cp packwiz-installer.jar \\n  link.infra.packwiz.installer.Main -s client <pack url>\n```\nIt downloads what changed and deletes what was removed — that is the whole auto-update mechanism. The jar is **committed and pinned** at `c9f6469…` and CI refuses to build the zip if a byte moves; it is never fetched from the internet at launch. The `.mrpack` on the pack page is the manual alternative."
+        },
+        {
+          "type": 14,
+          "divider": false,
+          "spacing": 2
+        },
+        {
+          "type": 1,
+          "components": [
+            {
+              "type": 2,
+              "style": 5,
+              "label": "Prism Launcher",
+              "url": "https://prismlauncher.org/download/"
+            },
+            {
+              "type": 2,
+              "style": 5,
+              "label": "the instance .zip",
+              "url": "https://weloveyou-pack.pages.dev/pack/stable/weloveyou-stable.zip"
+            },
+            {
+              "type": 2,
+              "style": 5,
+              "label": "pack page",
+              "url": "https://weloveyou-pack.pages.dev/pack/stable/"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
