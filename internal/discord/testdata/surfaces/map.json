@@ -1,0 +1,46 @@
+{
+  "_meta": {
+    "surface": "map",
+    "title": "Map card",
+    "note": "Ambient, never urgent. The render is a squaremap tile crop and does not exist yet. The Activity button is the D4 payoff."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 8693404,
+      "components": [
+        {
+          "type": 10,
+          "content": "# the world <:map:>\n-# day 412 · rendered <t:1787580000:R>"
+        },
+        {
+          "type": 12,
+          "items": [
+            {
+              "media": {
+                "url": "https://weloveyou-pack.pages.dev/assets/map-latest.png"
+              },
+              "description": "A crop of the live squaremap render around spawn."
+            }
+          ]
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### open it\npan, zoom, and watch everyone move."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "the map",
+            "url": "http://100.103.121.9:8123/"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -206,9 +207,13 @@ func runGuild(args []string, out io.Writer) error {
 
 	token := os.Getenv("WLY_DISCORD_TOKEN")
 	if token == "" {
+		token = fromEnvFile("deploy/.env", "WLY_DISCORD_TOKEN")
+	}
+	if token == "" {
 		return fmt.Errorf("WLY_DISCORD_TOKEN is not set. Put the bot token in " +
-			"deploy/.env or export it in your shell; it is never read from guild.toml, " +
-			"because that file is committed and a token in it would be public")
+			"deploy/.env, which is gitignored, or export it in your shell. It is " +
+			"never read from guild.toml, because that file is committed and a token " +
+			"in it would be public")
 	}
 
 	live, err := newDiscordClient(token).fetchLive(want.Meta.ID)
@@ -230,4 +235,42 @@ func runGuild(args []string, out io.Writer) error {
 	}
 	return fmt.Errorf("--apply is not implemented yet: plan against the real server " +
 		"first and read what it says before anything writes")
+}
+
+// fromEnvFile reads one key out of a compose .env file.
+//
+// This exists because the error message told people to put the token in
+// deploy/.env and then did not read it: inside the container compose passes it
+// through as a real environment variable, but `wly guild` is run by hand from a
+// checkout, where nothing had. An instruction that does not work is worse than
+// no instruction.
+//
+// Deliberately not a dotenv library, and deliberately not exported: it reads
+// KEY=VALUE, skips blanks and comments, strips one layer of matching quotes, and
+// does not expand anything. A value with a `#` in it survives, because a bot
+// token can contain almost anything and stripping trailing comments would eat it.
+func fromEnvFile(path, key string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		name, val, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(name) != key {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		if len(val) >= 2 && (val[0] == '"' || val[0] == '\'') && val[len(val)-1] == val[0] {
+			val = val[1 : len(val)-1]
+		}
+		return val
+	}
+	return ""
 }

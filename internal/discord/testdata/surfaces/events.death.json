@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "surface": "events.death",
+    "title": "Event feed, death",
+    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 12873820,
+      "components": [
+        {
+          "type": 10,
+          "content": "<:skull:> **kon** fell from a high place\n-# day 412 · x 214, z -88"
+        }
+      ]
+    }
+  ]
+}

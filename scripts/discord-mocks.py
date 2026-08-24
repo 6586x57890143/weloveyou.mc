@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime
 import html
 import json
 import mimetypes
@@ -49,6 +50,13 @@ MAX_BUTTONS_PER_ROW = 5
 
 ACTION_ROW, BUTTON, SECTION = 1, 2, 9
 TEXT_DISPLAY, THUMBNAIL, MEDIA_GALLERY, FILE, SEPARATOR = 10, 11, 12, 13, 14
+
+# Discord's timestamp styles. Anything else renders as literal text to a player,
+# which looks like a bug rather than a date.
+TS_STYLES = {
+    "t": "short time", "T": "long time", "d": "short date", "D": "long date",
+    "f": "short date/time", "F": "long date/time", "R": "relative",
+}
 CONTAINER = 17
 
 NAMES = {
@@ -135,6 +143,10 @@ def validate(payload, label):
         elif t == TEXT_DISPLAY:
             if not c.get("content", "").strip():
                 err("Text Display has no content")
+            for ts in re.findall(r"<t:\d+:(\w)>", c.get("content", "")):
+                if ts not in TS_STYLES:
+                    err("uses timestamp style :%s:, which Discord does not "
+                        "render; valid styles are %s" % (ts, ", ".join(sorted(TS_STYLES))))
             for ref in re.findall(r"<:(\w+):\d*>", c.get("content", "")):
                 if ref not in ICONS:
                     err("names custom emoji :%s:, which is not in "
@@ -163,6 +175,28 @@ def budget(payload):
 # ---------------------------------------------------------------------------
 
 
+def _timestamp(m):
+    """Render <t:UNIX:STYLE> the way a Discord client would."""
+    when = datetime.datetime.fromtimestamp(int(m.group(1)), datetime.timezone.utc)
+    style = m.group(2) or "f"
+    if style == "R":
+        secs = (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        ahead, secs = secs > 0, abs(secs)
+        for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+            if secs >= size:
+                n = int(secs // size)
+                text = "%d %s%s" % (n, unit, "" if n == 1 else "s")
+                return '<span class="ts-r">%s</span>' % (
+                    ("in " + text) if ahead else (text + " ago"))
+        return '<span class="ts-r">just now</span>'
+    if style in ("d", "D"):
+        return '<span class="ts-r">%s</span>' % when.strftime(
+            "%d/%m/%Y" if style == "d" else "%d %B %Y")
+    if style in ("t", "T"):
+        return '<span class="ts-r">%s</span>' % when.strftime("%H:%M")
+    return '<span class="ts-r">%s</span>' % when.strftime("%d %B %Y %H:%M")
+
+
 def markdown(src):
     fences = []
 
@@ -177,6 +211,7 @@ def markdown(src):
     # <:name:> because the id does not exist until the reconciler uploads it.
     out = re.sub(r"&lt;:(\w+):\d*&gt;",
                  lambda m: svg(m.group(1), size=18, cls="icon emoji"), out)
+    out = re.sub(r"&lt;t:(\d+)(?::(\w))?&gt;", _timestamp, out)
     out = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", out)
     out = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", out)
 
@@ -268,6 +303,8 @@ h1{font-size:15px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;m
 .gap{height:.55rem}
 .icon{image-rendering:pixelated;display:block}
 .emoji{display:inline-block;vertical-align:-.22em;margin:0 .08em}
+/* Discord tints a rendered timestamp so it reads as generated, not typed. */
+.ts-r{background:#3C4270;border-radius:3px;padding:0 2px}
 code{background:var(--dc-code);border-radius:3px;padding:.1em .3em;
  font-family:var(--mono);font-size:12.5px}
 pre{background:var(--dc-code);border:1px solid #2E3035;border-radius:4px;

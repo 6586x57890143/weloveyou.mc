@@ -1,0 +1,38 @@
+{
+  "_meta": {
+    "surface": "spend",
+    "title": "Daily spend",
+    "note": "The sixth surface, which the master plan omitted and CLAUDE.md requires. Escalation matches cost-push.sh exactly: dim is fine, base is over budget or projected over, lose is a stale or missing report. A null amount is unknown, never zero."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 9340535,
+      "components": [
+        {
+          "type": 10,
+          "content": "# spend <:coin:>\n-# for <t:1787500800:D>"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 10,
+          "content": "yesterday **€0.034**\nmonth to date **€0.81**\nprojected **€1.02** of €5.00"
+        },
+        {
+          "type": 14,
+          "divider": false,
+          "spacing": 2
+        },
+        {
+          "type": 10,
+          "content": "-# credits expire <t:1789488000:D>. a null amount is reported as unknown, never as zero."
+        }
+      ]
+    }
+  ]
+}

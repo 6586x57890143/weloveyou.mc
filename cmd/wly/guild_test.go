@@ -287,3 +287,45 @@ func TestSortRolesHighestFirst(t *testing.T) {
 	}
 	sortRolesHighestFirst(nil) // must not panic
 }
+
+func TestFromEnvFile(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".env")
+	body := "# a comment\n\n" +
+		"OTHER=x\n" +
+		"  WLY_DISCORD_TOKEN = plain-value  \n" +
+		"QUOTED=\"in quotes\"\n" +
+		"SINGLE='single quotes'\n" +
+		"HASHY=tok#en-with-hash\n" +
+		"NOEQUALS\n"
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ key, want string }{
+		{"WLY_DISCORD_TOKEN", "plain-value"},
+		{"QUOTED", "in quotes"},
+		{"SINGLE", "single quotes"},
+		// A bot token can contain almost anything, so stripping a trailing
+		// comment would silently truncate it.
+		{"HASHY", "tok#en-with-hash"},
+		{"NOEQUALS", ""},
+		{"ABSENT", ""},
+	} {
+		if got := fromEnvFile(p, tc.key); got != tc.want {
+			t.Errorf("fromEnvFile(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+	if got := fromEnvFile(filepath.Join(dir, "nope"), "X"); got != "" {
+		t.Errorf("missing file returned %q", got)
+	}
+}
+
+// The environment wins over the file, so an export can override a stale .env
+// without editing it.
+func TestRunGuildPrefersEnvOverFile(t *testing.T) {
+	fakeDiscord(t, guildRoutes())
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+	if err := runGuild([]string{"--config", testConfig(t, "42")}, &bytes.Buffer{}); err != nil {
+		t.Fatalf("env token not used: %v", err)
+	}
+}

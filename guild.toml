@@ -27,7 +27,7 @@
 name = "wly"
 # Reconciliation refuses to touch a guild whose id does not match, so a token
 # pointed at the wrong server cannot rewrite it. Empty means "refuse everything".
-id = ""
+id = "1540075305652199514"
 
 # ---------------------------------------------------------------------------
 # Roles, highest first. wly's own role is not declared here: Discord creates it
