@@ -37,3 +37,52 @@ pack_url   = "https://weloveyou-pack.pages.dev/pack/stable/pack.toml"
 # [channels.edge]
 # mc_version = "26.2"
 # pack_url   = "https://weloveyou-pack.pages.dev/pack/edge/pack.toml"
+
+# The server-list MOTD. DESIGN ONLY, nothing reads this yet.
+#
+# MiniMOTD (pack/stable, side "server", by the same author as squaremap) answers
+# the ping and picks a line, which is what makes rotation possible at all:
+# vanilla reads server.properties once at boot and has no runtime setter. The
+# compose MOTD is now only the fallback for MiniMOTD failing to load.
+#
+# Rotation works with MiniMOTD alone. The LIVE numbers below need wly to rewrite
+# MiniMOTD's config, and wly mounts mc-data READ-ONLY on purpose, so that needs
+# one narrow read-write mount and is deliberately a later phase. Static lines
+# first, live lines second.
+#
+# Line one is fixed and is the brand. Line two rotates, and every line is filled
+# from state wly already has for the Discord status board, so the two can never
+# disagree about how many people are on.
+#
+# 59 characters is roughly what fits before the server list truncates, and the
+# section-sign colour codes count toward it. Keep line two short.
+[motd]
+# Minecraft allows exactly two lines.
+brand = "§d§lwly §d♥§r §8│ §7fabric 1.21.1"
+
+# Picked in order, skipping any whose data is missing rather than printing a
+# hole. A line that cannot be filled is not shown, which is why there are more
+# of them than the rotation needs.
+lines = [
+    "§7day {day} §8· §7{online} online",
+    "§7pack {pack} §8· §7updated {pack_age}",
+    "§7up {uptime} §8· §7no crash in {crash_free}",
+    "§7{deathless} of us have never died",
+    "§8last seen: §7{last_seen}",
+    # Flavour. No placeholders, so these always render and are the whole
+    # rotation until wly can write live numbers in. The server list is the one
+    # place someone has not decided yet, which is why a joke earns its slot here
+    # and nowhere else.
+    "§8§obring a shovel",
+    "§7terralith §8· §7oritech §8· §8§otwo cores, doing their best",
+]
+
+# Where each placeholder comes from. Named here so nothing gets invented later:
+#   day         RCON `time query day`
+#   online      RCON `list`
+#   pack        pack.toml version, the same fetch bench.Pack already does
+#   pack_age    mtime of the last release wly saw
+#   uptime      Docker Engine API inspect on the mc container
+#   crash_free  time since the last watchdog or exit line in latest.log
+#   deathless   count of world/stats/<uuid>.json with deaths == 0
+#   last_seen   last join or leave in latest.log

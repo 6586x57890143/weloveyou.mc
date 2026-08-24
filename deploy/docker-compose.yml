@@ -104,7 +104,13 @@ services:
       # missed hello. Section signs are colour codes; the file is UTF-8 so the
       # emoji survive. Single-quoted YAML so the escape stays two literal
       # characters rather than becoming a real newline compose folds away.
-      MOTD: '§d§l♥ we§f§llove§d§lyou §d♥  §8│ §7Fabric 1.21.1\n§7Terralith §8· §7Oritech §8· §8§obring a shovel'
+      # FALLBACK ONLY. MiniMOTD is in pack/stable (side "server") and takes
+      # over on every ping, which is what makes the second line rotate.
+      # Vanilla reads server.properties once at boot and has no runtime
+      # setter, so a rotating MOTD is impossible without something answering
+      # the ping. This stays correct rather than being deleted, because it is
+      # what shows if MiniMOTD ever fails to load.
+      MOTD: '§d§lwly §d♥§r  §8│ §7fabric 1.21.1\n§7terralith §8· §7oritech §8· §8§obring a shovel'
 
       # Seeds only. EXISTING_WHITELIST_FILE is deliberately left at itzg's
       # default of SKIP rather than SYNCHRONIZE: with SYNCHRONIZE the env var

@@ -1,0 +1,92 @@
+{
+  "_meta": {
+    "surface": "getstarted",
+    "direction": "b",
+    "title": "Card",
+    "status": "chosen 2026-08-24",
+    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. Custom guild emoji carry the mark. No pitch: it is an interface, so it says what to do and nothing about why the server is nice. The screenshot is real now, recoloured to the palette and published from the pack repo."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 14916270,
+      "components": [
+        {
+          "type": 10,
+          "content": "# wly <:heart:>\n-# minecraft 1.21.1 · whitelist only"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 1. get prism launcher\nthe pack only auto-updates in prism."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "Download",
+            "url": "https://prismlauncher.org/download/"
+          }
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 2. import the instance\n`Add Instance` → `Import from zip` → paste the link."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "the .zip",
+            "url": "https://weloveyou-pack.pages.dev/pack/stable/weloveyou-stable.zip"
+          }
+        },
+        {
+          "type": 12,
+          "items": [
+            {
+              "media": {
+                "url": "https://weloveyou-pack.pages.dev/assets/prism-import.png"
+              },
+              "description": "Prism Launcher's Add Instance window, Import from zip selected, with the link field outlined."
+            }
+          ]
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### 3. launch, then join\nthe first launch pulls the pack down. post `/whitelist add <your name>` here, then connect:\n```\n158.180.53.71\n```"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "pack page",
+            "url": "https://weloveyou-pack.pages.dev/pack/stable/"
+          }
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 10,
+          "content": "-# **worth knowing:** importing this instance lets prism run a small updater before every launch. that is what keeps your mods in sync, so a pack update never asks anything of you. the updater ships inside the zip and we check it on the way in, nothing gets downloaded fresh at launch. if you would rather skip all that, grab the .mrpack from the pack page and update by hand."
+        }
+      ]
+    }
+  ]
+}
