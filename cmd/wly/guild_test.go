@@ -303,7 +303,8 @@ func TestRunGuildApplyWrites(t *testing.T) {
 
 	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
 	var out bytes.Buffer
-	if err := runGuild([]string{"--config", testConfig(t, "42"), "--apply"}, &out); err != nil {
+	if err := runGuild([]string{"--config", testConfig(t, "42"),
+		"--icons", filepath.Join("..", "..", "icons.toml"), "--apply"}, &out); err != nil {
 		t.Fatalf("apply failed: %v\n%s", err, out.String())
 	}
 
@@ -327,24 +328,38 @@ func TestRunGuildApplyWrites(t *testing.T) {
 			t.Fatalf("apply issued %s; it must never delete", w)
 		}
 	}
-	if !strings.Contains(out.String(), "emoji NOT uploaded") {
-		t.Errorf("apply did not admit that emoji are still deferred:\n%s", out.String())
+	// skull is missing from the fake guild, so apply renders and uploads it.
+	if !strings.Contains(joined, "POST /guilds/42/emojis") {
+		t.Errorf("apply never uploaded the missing emoji. it issued:\n%s", joined)
+	}
+	if !strings.Contains(out.String(), "uploaded emoji skull") {
+		t.Errorf("apply did not report the upload:\n%s", out.String())
+	}
+	// heart already exists there, so it must not be uploaded twice.
+	if strings.Count(joined, "POST /guilds/42/emojis") != 1 {
+		t.Errorf("expected exactly one emoji upload, got:\n%s", joined)
 	}
 }
 
-// A bot sitting low has no room to place roles beneath it. Reordering there
-// would push managed roles above the bot, which is the hierarchy trap.
-func TestApplyRefusesToReorderWhenBotIsTooLow(t *testing.T) {
+// Discord is the authority on the hierarchy, not arithmetic here. When it
+// refuses the reorder, apply must say so, keep going, and leave the roles it
+// already made alone.
+func TestApplyReportsRefusedReorderAndContinues(t *testing.T) {
 	routes := guildRoutes()
 	routes["/guilds/42/roles"] = `[
 		{"id":"9","name":"wly","managed":true,"position":1},
 		{"id":"1","name":"@everyone","position":0}
 	]`
 	routes["/guilds/42/channels"] = `[]`
+
+	var writes []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" {
-			if r.URL.Path == "/guilds/42/roles" && r.Method == "PATCH" {
-				t.Error("reordered roles despite the bot having no room below it")
+			writes = append(writes, r.Method+" "+r.URL.Path)
+			if r.Method == "PATCH" && r.URL.Path == "/guilds/42/roles" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"message":"Missing Permissions","code":50013}`))
+				return
 			}
 			_, _ = w.Write([]byte(`{"id":"new"}`))
 			return
@@ -363,10 +378,20 @@ func TestApplyRefusesToReorderWhenBotIsTooLow(t *testing.T) {
 
 	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
 	var out bytes.Buffer
-	if err := runGuild([]string{"--config", testConfig(t, "42"), "--apply"}, &out); err != nil {
-		t.Fatal(err)
+	err := runGuild([]string{"--config", testConfig(t, "42"),
+		"--icons", filepath.Join("..", "..", "icons.toml"), "--apply"}, &out)
+	if err != nil {
+		t.Fatalf("a refused reorder must not abort apply: %v", err)
 	}
-	if !strings.Contains(out.String(), "Drag it to the top") {
-		t.Errorf("apply did not explain why it skipped the reorder:\n%s", out.String())
+	got := out.String()
+	if !strings.Contains(got, "could not set role order") {
+		t.Errorf("apply hid the refusal:\n%s", got)
+	}
+	if !strings.Contains(got, "drag ") {
+		t.Errorf("apply did not say how to fix it:\n%s", got)
+	}
+	// It carried on: the channel work happened after the failed reorder.
+	if !strings.Contains(got, "created channel general") {
+		t.Errorf("apply stopped at the reorder:\n%s", got)
 	}
 }

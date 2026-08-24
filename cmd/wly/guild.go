@@ -137,7 +137,7 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 	sortRolesHighestFirst(roles)
 	for _, r := range roles {
 		live.Roles = append(live.Roles, discord.LiveRole{
-			ID: r.ID, Name: r.Name, Color: r.Color,
+			ID: r.ID, Name: r.Name, Color: r.Color, Position: r.Position,
 			Hoist: r.Hoist, Mentionable: r.Mentionable, Managed: r.Managed,
 		})
 	}
@@ -210,6 +210,8 @@ func runGuild(args []string, out io.Writer) error {
 	fs.SetOutput(out)
 	config := fs.String("config", "guild.toml", "the declared server")
 	apply := fs.Bool("apply", false, "make the changes, rather than only printing them")
+	roles := fs.Bool("roles", false, "print the live role list with positions and stop")
+	icons := fs.String("icons", "icons.toml", "the pixel icon set uploaded as emoji")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -234,6 +236,21 @@ func runGuild(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *roles {
+		fmt.Fprintf(out, "%-28s %8s  %s\n", "ROLE", "POSITION", "NOTE")
+		for _, r := range live.Roles {
+			note := ""
+			if r.Managed {
+				note = "managed by Discord"
+			}
+			if r.Name == live.BotHighestRole {
+				note = "<- the bot's highest"
+			}
+			fmt.Fprintf(out, "%-28s %8d  %s\n", r.Name, r.Position, note)
+		}
+		return nil
+	}
+
 	plan, err := discord.Compute(want, live)
 	if err != nil {
 		return err
@@ -251,7 +268,7 @@ func runGuild(args []string, out io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(out, "\napplying:")
-	return newDiscordClient(token).applyPlan(want, live, plan, out)
+	return newDiscordClient(token).applyPlan(want, live, plan, *icons, out)
 }
 
 // fromEnvFile reads one key out of a compose .env file.
@@ -302,7 +319,7 @@ func fromEnvFile(path, key string) string {
 //     hierarchy is guild.toml's order, not creation order
 //  3. categories, because channels reference them by id
 //  4. channels, with their overwrites resolved from the role ids created in 1
-func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discord.Plan, out io.Writer) error {
+func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discord.Plan, iconPath string, out io.Writer) error {
 	roleID := map[string]string{discord.Everyone: g.Meta.ID} // @everyone's id IS the guild id
 	for _, r := range live.Roles {
 		roleID[r.Name] = r.ID
@@ -352,25 +369,27 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 	// 2. hierarchy. guild.toml is highest first, and Discord's position is
 	// higher-is-higher, so the first declared role gets the largest number. The
 	// bot's own role must stay above all of them, so counting starts below it.
+	// Discord gives every newly created role position 1 and does not renumber
+	// the rest, so a fresh guild reports a pile of ties and any arithmetic on
+	// "the bot's position" is reading noise. An earlier version refused to
+	// reorder based on exactly that number and was wrong on a real server.
+	//
+	// So: attempt it, and let Discord be the authority. It refuses to move any
+	// role above the caller's own highest, and the PATCH is all-or-nothing, so a
+	// bot that is not on top changes nothing and says so. That is a better test
+	// than anything guessable from here.
 	var positions []map[string]any
-	top := live.BotHighestPosition - 1
-	if top < len(g.Roles) {
-		fmt.Fprintf(out, "  ! not setting role order: the bot's %q role is at position %d, "+
-			"which leaves no room for %d roles below it. Drag it to the top of "+
-			"Server Settings -> Roles and re-run.\n",
-			live.BotHighestRole, live.BotHighestPosition, len(g.Roles))
-	} else {
-		for i, r := range g.Roles {
-			if id, ok := roleID[r.Name]; ok {
-				positions = append(positions, map[string]any{"id": id, "position": top - i})
-			}
+	for i, r := range g.Roles {
+		if id, ok := roleID[r.Name]; ok {
+			positions = append(positions, map[string]any{"id": id, "position": len(g.Roles) - i})
 		}
 	}
 	if len(positions) > 0 {
 		if err := c.do("PATCH", "/guilds/"+g.Meta.ID+"/roles", positions, nil); err != nil {
-			// Not fatal: the roles exist and are usable, the order is cosmetic
-			// until something is gated on it. Say so rather than unwinding.
-			fmt.Fprintf(out, "  ! could not set role order: %v\n", err)
+			fmt.Fprintf(out, "  ! could not set role order: %v\n"+
+				"    The roles exist and work; only their order is pending. Discord\n"+
+				"    refuses to move a role above the bot's own, so drag %q to the top\n"+
+				"    of Server Settings -> Roles and re-run.\n", err, live.BotHighestRole)
 		} else {
 			fmt.Fprintln(out, "  set role order from guild.toml")
 		}
@@ -442,10 +461,28 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 		}
 	}
 
+	// 5. emoji. The grids live in icons.toml, read by both this and
+	// scripts/pixelicons.py, so what the pages draw and what Discord shows
+	// cannot drift apart.
 	if n := len(todo[discord.UploadEmoji]); n > 0 {
-		fmt.Fprintf(out, "\n  %d emoji NOT uploaded. The icon grids live in\n"+
-			"  scripts/pixelicons.py and Go cannot read them yet; sharing them and\n"+
-			"  encoding a PNG is the next commit. Nothing above depended on it.\n", n)
+		ic, err := discord.LoadIcons(iconPath)
+		if err != nil {
+			return fmt.Errorf("%d emoji not uploaded: %w", n, err)
+		}
+		for _, name := range g.Emojis.Upload {
+			if !todo[discord.UploadEmoji][name] {
+				continue
+			}
+			uri, err := ic.DataURI(name, 128)
+			if err != nil {
+				return fmt.Errorf("render emoji %s: %w", name, err)
+			}
+			body := map[string]any{"name": name, "image": uri}
+			if err := c.do("POST", "/guilds/"+g.Meta.ID+"/emojis", body, nil); err != nil {
+				return fmt.Errorf("upload emoji %s: %w", name, err)
+			}
+			fmt.Fprintf(out, "  uploaded emoji %s\n", name)
+		}
 	}
 	return nil
 }

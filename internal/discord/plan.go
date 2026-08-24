@@ -30,6 +30,7 @@ type Live struct {
 type LiveRole struct {
 	ID          string
 	Name        string
+	Position    int
 	Color       int
 	Hoist       bool
 	Mentionable bool

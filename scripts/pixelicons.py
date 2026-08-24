@@ -18,133 +18,18 @@ does not exist yet. Until then the mockups draw the SVG so what you review is
 what a player will see.
 """
 
-PALETTE = {
-    "h": "#3A2A16",  # hair
-    "s": "#B58868",  # skin
-    "p": "#C8A882",  # villager skin, paler
-    "n": "#A97B57",  # that nose
-    "w": "#E8E8E8",  # eye white
-    "b": "#3A5FCD",  # eye
-    "m": "#6E4A32",  # mouth
-    "f": "#7A7A7A",  # machine frame
-    "d": "#3A3A3A",  # machine interior
-    "g": "#D8A657",  # a lit panel, and gold
-    "y": "#A87A2E",  # gold, in shadow
-    "G": "#6A8F3C",  # grass
-    "D": "#79553A",  # dirt
-    "H": "#E39AAE",  # heart
-    "o": "#7A5C3A",  # tool handle
-    "i": "#C9CCD1",  # iron
-    "P": "#D8C9A3",  # parchment
-    "r": "#C4705C",  # a route drawn on it, and anything gone wrong
-    "k": "#E8E4D8",  # bone
-    "x": "#2A2622",  # a hole
-}
+import pathlib
+import tomllib
 
-# A character with no palette entry is transparent, which is what "." means
-# everywhere below.
-ICONS = {
-    # Steve, more or less: hair, eyes, a suggestion of a mouth.
-    "player": [
-        "hhhhhhhh",
-        "hhhhhhhh",
-        "hssssssh",
-        "swbssbws",
-        "ssssssss",
-        "sssmmsss",
-        "ssssssss",
-        "ssssssss",
-    ],
-    # The villager is all brow and nose, which is the whole joke.
-    "villager": [
-        "hhhhhhhh",
-        "hhhhhhhh",
-        "pppppppp",
-        "pwpnnpwp",
-        "pppnnppp",
-        "pppnnppp",
-        "pppnnppp",
-        "pppppppp",
-    ],
-    # A machine: metal frame, lit face.
-    "machines": [
-        "ffffffff",
-        "fddddddf",
-        "fdggggdf",
-        "fdgddgdf",
-        "fdgddgdf",
-        "fdggggdf",
-        "fddddddf",
-        "ffffffff",
-    ],
-    # Grass on dirt, for the worldgen workloads.
-    "world": [
-        "GGGGGGGG",
-        "GGGGGGGG",
-        "DGDDGDDG",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-        "DDDDDDDD",
-    ],
-    # The server's own mark. It is in the MOTD, so it belongs here too.
-    "heart": [
-        ".HH..HH.",
-        "HHHHHHHH",
-        "HHHHHHHH",
-        "HHHHHHHH",
-        ".HHHHHH.",
-        "..HHHH..",
-        "...HH...",
-        "........",
-    ],
-    # Bring a shovel. Drawn head-on rather than on the diagonal: at the 18px an
-    # inline emoji actually renders at, a diagonal handle reads as a smudge.
-    # Checked in a browser, which is the only way that shows up.
-    "shovel": [
-        "...oo...",
-        "...oo...",
-        "...oo...",
-        "..iiii..",
-        ".iiiiii.",
-        ".iiiiii.",
-        ".iiiiii.",
-        "..iiii..",
-    ],
-    "map": [
-        "PPPPPPPP",
-        "PPPPPPPP",
-        "PPrrPPPP",
-        "PPPPrPPP",
-        "PPPrPPPP",
-        "PPPPrrPP",
-        "PPPPPPPP",
-        "PPPPPPPP",
-    ],
-    # Spend, on the daily cost post.
-    "coin": [
-        "..gggg..",
-        ".gggggg.",
-        "gggggggg",
-        "ggyyyygg",
-        "ggyyyygg",
-        "gggggggg",
-        ".gggggg.",
-        "..gggg..",
-    ],
-    # A death in the feed.
-    "skull": [
-        ".kkkkkk.",
-        "kkkkkkkk",
-        "kxxkkxxk",
-        "kxxkkxxk",
-        "kkkkkkkk",
-        "kkxxxxkk",
-        ".kxkkxk.",
-        "..kkkk..",
-    ],
-}
+# ONE SOURCE. The grids moved to icons.toml so internal/discord can read them
+# too: Discord cannot render SVG in a message, so the same icons have to arrive
+# there as uploaded PNG, and a second copy in Go would have drifted exactly the
+# way the palette did before scripts/brand.py existed.
+_DATA = tomllib.loads(
+    (pathlib.Path(__file__).resolve().parent.parent / "icons.toml").read_text(encoding="utf-8"))
+
+PALETTE = _DATA["palette"]
+ICONS = {name: entry["rows"] for name, entry in _DATA["icons"].items()}
 
 
 def svg(name, size=20, cls="icon"):
