@@ -229,10 +229,23 @@ services:
     image: "${DB_IMAGE:-postgres:17-alpine}"
     container_name: wly-db
     restart: unless-stopped
+    # Behind the same profile as wly, and for the same reason. Nothing consumes
+    # this database until the bot exists, and POSTGRES_PASSWORD is required
+    # rather than defaulted, so leaving it in the default set made `compose up`
+    # fail on every box that had not set DB_PASSWORD yet. A service that is not
+    # used yet must not be able to break a deploy that does not use it.
+    #
+    #   docker compose --profile bot up -d
+    profiles: ["bot"]
     environment:
       POSTGRES_DB: "${DB_NAME:-wly}"
       POSTGRES_USER: "${DB_USER:-wly}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}"
+      # NOT `:?`. Compose interpolates every service in the file regardless of
+      # profile, so a required variable here failed `compose up` for anyone who
+      # had not set it, including a box that only runs Minecraft. The postgres
+      # image already refuses to initialise without a password and says exactly
+      # that, so the enforcement is kept and the collateral damage is not.
+      POSTGRES_PASSWORD: "${DB_PASSWORD:-}"
       # Postgres is happy to fsync less on a hobby box, but this is player
       # identity rather than a cache, so it keeps its defaults.
     volumes:
