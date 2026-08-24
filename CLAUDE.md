@@ -206,10 +206,18 @@ world archive. Three things that are not obvious:
   that has already run `schema.sql` from initdb. That is the normal case, not a corner
   one: a fresh volume always runs `schema.sql`, so a plain dump would fail halfway through
   the restore, at exactly the hour you would rather it did not.
-  **Verified 2026-08-24** on the box against `postgres:17-alpine`: seed two rows, dump,
-  drop and recreate the table the way initdb would, restore, `ON_ERROR_STOP=1` exit 0 and
-  both rows back. What that does NOT cover is the full compose path with a real `db-data`
-  volume, so treat it as the mechanics proven and the drill still owed.
+  **Database restore rehearsed 2026-08-24**, twice and by two routes, which is why the
+  flag is not optional. On the box: seed two rows, dump, drop and recreate the table the
+  way initdb would, restore, `ON_ERROR_STOP=1` exit 0 and both rows back. Locally through
+  the real initdb path: a plain `pg_dump` restored onto a fresh volume that had run
+  `schema.sql` dies with `relation "link_requests" already exists`, psql exit 3. The same
+  dump taken with `--clean --if-exists` then restores cleanly onto that same failed
+  database AND into one that has never seen `schema.sql`.
+
+  **Constraints survive the round trip, and that is the check worth keeping.** A restore
+  that returns rows without them is worse than one that fails, because it looks fine: after
+  restoring, inserting a second `players` row with an already-taken `mc_uuid` still fails
+  on `players_mc_uuid_key`. One Minecraft account still belongs to exactly one person.
 
 `BACKUP_TARGET` is one setting and deliberately temporary, not a design. Object storage
 replaces the desktop later and nothing else changes.
