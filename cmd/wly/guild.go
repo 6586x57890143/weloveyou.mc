@@ -62,7 +62,9 @@ func (c *discordClient) do(method, path string, body, out any) error {
 	}
 	defer resp.Body.Close()
 
-	raw, _ := io.ReadAll(resp.Body)
+	// Bounded: an unbounded read means a hostile or broken response can balloon
+	// a 512m container. 4 MiB is far past anything Discord returns for these.
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return fmt.Errorf("rate limited by Discord on %s %s: %s", method, path, raw)
 	}
