@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "surface": "events.firstjoin",
+    "title": "Event feed, firstjoin",
+    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 14916270,
+      "components": [
+        {
+          "type": 10,
+          "content": "<:heart:> **m** joined for the first time\n-# say hi"
+        }
+      ]
+    }
+  ]
+}

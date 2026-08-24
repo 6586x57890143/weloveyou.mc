@@ -1,0 +1,57 @@
+{
+  "_meta": {
+    "surface": "status",
+    "title": "Status board",
+    "note": "One pinned message, edited in place, never reposted. Accent is state: info healthy, base degraded, lose down. The relative timestamp ticks client-side, so the board stays honest between edits."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 8693404,
+      "components": [
+        {
+          "type": 10,
+          "content": "# wly <:heart:>\n-# up <t:1787580000:R> · edited in place, never reposted"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### online\n**3** of us right now\nkon, ellis, m"
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "open the map",
+            "url": "http://100.103.121.9:8123/"
+          }
+        },
+        {
+          "type": 10,
+          "content": "### the world\nday **412** · **19.98** TPS · **8.4ms** p95 tick"
+        },
+        {
+          "type": 10,
+          "content": "### the pack\n**v0.1.7** · minecraft 1.21.1"
+        },
+        {
+          "type": 14,
+          "divider": false,
+          "spacing": 2
+        },
+        {
+          "type": 10,
+          "content": "-# next backup <t:1787632200:R>. numbers refresh every minute."
+        }
+      ]
+    }
+  ]
+}

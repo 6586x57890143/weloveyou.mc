@@ -1,0 +1,20 @@
+{
+  "_meta": {
+    "surface": "events.advancement",
+    "title": "Event feed, advancement",
+    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 9414752,
+      "components": [
+        {
+          "type": 10,
+          "content": "<:world:> **ellis** earned **The End?**\n-# day 412"
+        }
+      ]
+    }
+  ]
+}

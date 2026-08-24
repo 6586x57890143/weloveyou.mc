@@ -1,0 +1,49 @@
+{
+  "_meta": {
+    "surface": "release",
+    "title": "Pack release",
+    "note": "Fires on a new version. The changelog comes from packwiz.Diff. The line that matters is the last one: normally you do nothing."
+  },
+  "flags": 32768,
+  "components": [
+    {
+      "type": 17,
+      "accent_color": 14198359,
+      "components": [
+        {
+          "type": 10,
+          "content": "# pack v0.1.8 <:heart:>\n-# minecraft 1.21.1 · 74 mods"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 10,
+          "content": "**added**\nminimotd, so the server list can say something true\n\n**updated**\nterralith 2.5.4 → 2.5.6\noritech 1.2.9 → 1.3.0\n\n**removed**\nnothing"
+        },
+        {
+          "type": 14,
+          "divider": true,
+          "spacing": 1
+        },
+        {
+          "type": 9,
+          "components": [
+            {
+              "type": 10,
+              "content": "### what you need to do\nnothing. it lands on your next launch."
+            }
+          ],
+          "accessory": {
+            "type": 2,
+            "style": 5,
+            "label": "pack page",
+            "url": "https://weloveyou-pack.pages.dev/pack/stable/"
+          }
+        }
+      ]
+    }
+  ]
+}

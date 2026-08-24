@@ -2,77 +2,87 @@
 # `wly guild apply` makes reality match. The layout becomes a reviewable diff,
 # the same way jvm-profiles.toml and docker-compose.yml already are.
 #
-# NOT YET IMPLEMENTED. This file is the design half of phase D0; the reconciler
-# is D1. It is committed now because the shape of it is what D1 is built
-# against, and because writing the traps down before the code exists is the
-# whole point of a design pass.
+# Roles and channels are ARRAYS OF TABLES, not named tables, because order is
+# meaning here and a named table lands in a Go map, which has none. Role order
+# is the hierarchy, highest first. Channel order is display order in its
+# category. The first version of this file said "order here is the hierarchy"
+# while parsing into something that could not preserve it.
 #
-# Three rules the reconciler must encode, each of which is a way to lose data:
+# Three rules the reconciler encodes, each of which is a way to lose data:
 #
 #   1. A bot can only manage roles STRICTLY BELOW its own highest role. The wly
-#      role goes at the top of the list and nothing declared here may outrank
-#      it, or apply silently no-ops on exactly the roles that matter. `plan`
-#      refuses to run if it finds a managed role above the bot.
+#      role goes at the top of the server's role list and nothing declared here
+#      may outrank it. `plan` REFUSES to run when it finds one that does, rather
+#      than emitting changes that would silently no-op.
 #   2. APPLY NEVER DELETES. A channel or role present on the server and absent
 #      here is reported as drift and left alone. Removing it is `--prune`, typed
 #      by a human who read the plan. Destroying a channel of history to satisfy
 #      a config file is the 3am page.
-#   3. Gradients are not always available. `colors.secondary` and `.tertiary`
-#      need the ENHANCED_ROLE_COLORS guild feature, which is boost-gated. Every
-#      role therefore declares `color` as a flat fallback, and the reconciler
-#      downgrades rather than failing when the feature is absent.
+#   3. Gradients are not always available. `colors` needs the ENHANCED_ROLE_COLORS
+#      guild feature, which is boost-gated. Every role also declares a flat
+#      `color`, and the reconciler downgrades rather than failing when the
+#      feature is absent.
 
 [guild]
 name = "wly"
 # Reconciliation refuses to touch a guild whose id does not match, so a token
 # pointed at the wrong server cannot rewrite it. Empty means "refuse everything".
-id = ""
+id = "1540075305652199514"
 
 # ---------------------------------------------------------------------------
-# Roles. Order here is the hierarchy, highest first, and wly must be above all
-# of the roles it manages.
+# Roles, highest first. wly's own role is not declared here: Discord creates it
+# when the bot joins, and it must sit above every one of these.
 # ---------------------------------------------------------------------------
 
-[roles.admin]
+[[roles]]
+name = "admin"
 color = "#C4705C"
 hoist = true
 permissions = ["Administrator"]
-managed_by_hand = true          # declared so drift reports mention it, never edited
+# Declared so drift reports name it, never edited by the reconciler. A config
+# file is the wrong place to be the authority on who is an administrator.
+manual = true
 
-[roles.supporter]
+[[roles]]
+name = "supporter"
 # The one gradient the palette earns: heart into the warning gold. Supporters
-# are the only hoisted cosmetic role, which is the perk.
+# are the only hoisted cosmetic role, which is most of the perk.
 color = "#E39AAE"
 colors = { primary = "#E39AAE", secondary = "#D8A657" }
 hoist = true
 mentionable = false
-granted_by = "entitlement"      # the payment rail, via the Worker + KV
+granted_by = "entitlement"      # the payment rail, via the Worker and KV
 
-[roles.day-one]
+[[roles]]
+name = "day-one"
 color = "#D8A657"
-granted_by = "linked_role"      # first_joined before the cutoff
+granted_by = "linked_role"
 metadata_key = "first_joined"
 
-[roles.deathless]
+[[roles]]
+name = "deathless"
 # Costs nothing, means something, and is lost the moment you die. The cheapest
 # status perk there is.
 color = "#8FA860"
 granted_by = "linked_role"
 metadata_key = "deaths"
 
-[roles.settled]
-color = "#84A69C"
-granted_by = "linked_role"
-metadata_key = "playtime_hours"
-threshold = 10
-
-[roles.rooted]
+[[roles]]
+name = "rooted"
 color = "#84A69C"
 granted_by = "linked_role"
 metadata_key = "playtime_hours"
 threshold = 100
 
-[roles.player]
+[[roles]]
+name = "settled"
+color = "#84A69C"
+granted_by = "linked_role"
+metadata_key = "playtime_hours"
+threshold = 10
+
+[[roles]]
+name = "player"
 # Whitelisted AND has actually connected. Gates the in-game channels, so a
 # lurker sees the door and not the room.
 color = "#8E8677"
@@ -80,54 +90,62 @@ granted_by = "linked_role"
 metadata_key = "has_joined"
 
 # ---------------------------------------------------------------------------
-# Channels. `category` groups them; `pinned_surface` names the surface wly owns
-# and edits in place. A channel with a pinned surface is wly's to write in.
+# Channels, in display order within each category. `surface` names the pinned
+# message wly owns and edits in place; a channel with one is wly's to write in.
 # ---------------------------------------------------------------------------
 
-[channels.start-here]
+[[channels]]
+name = "start-here"
 category = "welcome"
 topic = "install the pack, get whitelisted, join"
-pinned_surface = "getstarted"
+surface = "getstarted"
 readonly = true
 
-[channels.announcements]
+[[channels]]
+name = "announcements"
 category = "welcome"
 topic = "pack releases and anything that changes how you play"
-pinned_surface = "release"
+surface = "release"
 readonly = true
 
-[channels.general]
+[[channels]]
+name = "general"
 category = "the server"
 topic = "talk about anything"
 
-[channels.status]
+[[channels]]
+name = "status"
 category = "the server"
 topic = "is it up, who is on, what it costs"
-pinned_surface = "status"
+surface = "status"
 readonly = true
 
-[channels.map]
+[[channels]]
+name = "map"
 category = "the world"
-topic = "the live map · open the Activity here"
-pinned_surface = "map"
+topic = "the live map, and the Activity"
+surface = "map"
 readonly = true
 
-[channels.feed]
+[[channels]]
+name = "feed"
 category = "the world"
 topic = "joins, deaths, advancements, as they happen"
-pinned_surface = "events"
+surface = "events"
 readonly = true
 visible_to = ["player"]
 
-[channels.supporters]
+[[channels]]
+name = "supporters"
 category = "the world"
 topic = "thank you, genuinely"
 visible_to = ["supporter"]
 
-[channels.ops]
+[[channels]]
+name = "ops"
 category = "ops"
 topic = "spend, health, backups. wly talks to itself in here."
-pinned_surface = "spend"
+surface = "spend"
 visible_to = ["admin"]
 
 # ---------------------------------------------------------------------------
@@ -136,10 +154,8 @@ visible_to = ["admin"]
 #
 # Discord cannot render SVG in a message, so this is the only way those icons
 # reach a player. Uploads are 128x128 and 256 KiB max, which an 8x8 grid scaled
-# with nearest-neighbour clears by a mile. The reconciler needs a PNG encoder to
-# do it and there is not one yet, so this list is the contract, not a feature.
-#
-# Managing these needs CREATE_GUILD_EXPRESSIONS on the bot.
+# with nearest-neighbour clears by a mile. Managing them needs
+# CREATE_GUILD_EXPRESSIONS on the bot.
 # ---------------------------------------------------------------------------
 
 [emojis]
