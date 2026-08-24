@@ -161,3 +161,31 @@ visible_to = ["admin"]
 [emojis]
 source = "scripts/pixelicons.py"
 upload = ["heart", "shovel", "map", "coin", "skull", "player", "villager", "machines", "world"]
+
+# ---------------------------------------------------------------------------
+# Interactions, and the deliberate absence of commands.
+#
+# A REGULAR PLAYER TYPES NOTHING. No slash commands at all: the one thing a
+# newcomer has to do is press a button on the pinned card in #start-here, and
+# everything else is a surface they read. A command surface is a thing to
+# discover, remember and get wrong, and a server whose onboarding is "type this
+# exactly" loses people at exactly the point it can least afford to.
+#
+# Admin commands, when they land, get `default_member_permissions` so Discord
+# does not even show them in the picker to anyone without the permission. That
+# is the mechanism for keeping the surface low: not documentation asking people
+# to ignore things, but Discord hiding them.
+#
+# Every custom_id a surface uses must be declared here. An undeclared one is a
+# button that does nothing when pressed, which is worse than an absent one
+# because a player has already committed to it. scripts/discord-mocks.py
+# enforces this.
+# ---------------------------------------------------------------------------
+
+[interactions]
+buttons = [
+    "link_start",   # opens the modal that asks for a Minecraft name
+]
+modals = [
+    "link_submit",  # the name comes back, we resolve it and open a request
+]

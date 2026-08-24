@@ -66,6 +66,7 @@ type Kind int
 const (
 	CreateRole Kind = iota
 	UpdateRole
+	ReorderRoles
 	CreateCategory
 	CreateChannel
 	UpdateChannel
@@ -75,6 +76,7 @@ const (
 
 var kindNames = map[Kind]string{
 	CreateRole: "create role", UpdateRole: "update role",
+	ReorderRoles:   "reorder roles",
 	CreateCategory: "create category", CreateChannel: "create channel",
 	UpdateChannel: "update channel", UploadEmoji: "upload emoji",
 	Drift: "drift",
@@ -178,6 +180,16 @@ func Compute(want *Guild, live Live) (*Plan, error) {
 		}
 		p.Drift = append(p.Drift, Action{Drift, "role " + r.Name,
 			"present on the server, absent from guild.toml"})
+	}
+
+	// Role ORDER is part of the diff, not a side effect of applying something
+	// else. It used to be applied only while creating roles, which meant that
+	// once every other thing matched, a wrong hierarchy could never be
+	// corrected: the plan came back empty and apply never ran. On a real server
+	// the order was right purely because creation order happened to match the
+	// file, which is luck, not configuration.
+	if d := orderDiff(want, live); d != "" {
+		p.Actions = append(p.Actions, Action{ReorderRoles, "hierarchy", d})
 	}
 
 	checkBotsHoldingRoles(want, live, p)
@@ -453,4 +465,40 @@ func checkBotsHoldingRoles(want *Guild, live Live, p *Plan) {
 					"Manage Roles", m.Name, strings.Join(held, " and ")))
 		}
 	}
+}
+
+// orderDiff describes how the live hierarchy differs from the declared one, or
+// "" when it does not.
+//
+// Only declared, non-manual roles are compared. Everything else on the server
+// sits wherever its owner put it, and dragging someone's integration role
+// around to satisfy this file would be exactly the overreach `manual` exists to
+// prevent.
+func orderDiff(want *Guild, live Live) string {
+	declared := map[string]bool{}
+	var wantOrder []string
+	for _, r := range want.Roles {
+		if r.Manual {
+			continue
+		}
+		declared[r.Name] = true
+		wantOrder = append(wantOrder, r.Name)
+	}
+
+	var liveOrder []string
+	for _, r := range live.Roles {
+		if declared[r.Name] {
+			liveOrder = append(liveOrder, r.Name)
+		}
+	}
+	// A role that does not exist yet is a create, not a reorder. Comparing a
+	// short list against a long one would report a difference on every first
+	// run and bury the real signal.
+	if len(liveOrder) != len(wantOrder) {
+		return ""
+	}
+	if slices.Equal(liveOrder, wantOrder) {
+		return ""
+	}
+	return fmt.Sprintf("%s -> %s", strings.Join(liveOrder, ", "), strings.Join(wantOrder, ", "))
 }

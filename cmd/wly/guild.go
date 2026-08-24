@@ -297,6 +297,11 @@ func runGuild(args []string, out io.Writer) error {
 		return nil
 	}
 	fmt.Fprintln(out, "\napplying:")
+	// applyPlan reads the plan for what to do, so an empty one is genuinely
+	// nothing to do. Role ORDER used to be the exception: it was applied as a
+	// side effect of creating roles rather than being in the plan, so once
+	// everything else matched, a wrong hierarchy could never be corrected. It
+	// is a ReorderRoles action now, which is why the shortcut above is safe.
 	return newDiscordClient(token).applyPlan(want, live, plan, *icons, out)
 }
 

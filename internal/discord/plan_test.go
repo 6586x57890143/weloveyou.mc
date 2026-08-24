@@ -386,3 +386,74 @@ func TestNoWarningsOnACleanServer(t *testing.T) {
 		t.Errorf("warnings on a clean server: %v", p.Warnings)
 	}
 }
+
+// Role ORDER is part of the diff, not a side effect of applying something else.
+// It used to be applied only while creating roles, which meant that once every
+// other thing matched, a wrong hierarchy could never be corrected: the plan came
+// back empty and apply never ran.
+func TestComputeDiffsRoleOrder(t *testing.T) {
+	live := liveMatching()
+	// supporter and player swapped on the server.
+	live.Roles = []LiveRole{
+		{Name: "wly", Managed: true},
+		{Name: "admin", Color: 0xC4705C, Hoist: true},
+		{Name: "player", Color: 0x8E8677},
+		{Name: "supporter", Color: 0xE39AAE, Hoist: true},
+		{Name: "@everyone"},
+	}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, a := range p.Actions {
+		if a.Kind == ReorderRoles {
+			found = true
+			if !strings.Contains(a.Detail, "player, supporter") ||
+				!strings.Contains(a.Detail, "supporter, player") {
+				t.Errorf("detail does not show both orders: %q", a.Detail)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no reorder action for a swapped hierarchy:\n%s", Render(p))
+	}
+}
+
+// A manual role sits wherever its owner put it. Dragging it around to satisfy
+// this file is exactly the overreach `manual` exists to prevent.
+func TestOrderIgnoresManualRoles(t *testing.T) {
+	live := liveMatching()
+	live.Roles = []LiveRole{
+		{Name: "wly", Managed: true},
+		{Name: "supporter", Color: 0xE39AAE, Hoist: true},
+		{Name: "player", Color: 0x8E8677},
+		{Name: "admin", Color: 0xC4705C, Hoist: true},
+		{Name: "@everyone"},
+	}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range p.Actions {
+		if a.Kind == ReorderRoles {
+			t.Fatalf("reordered because of a manual role: %s", a.Detail)
+		}
+	}
+}
+
+// On a first run the roles do not exist yet. Comparing a short live list to a
+// full declared one would report a reorder every time and bury the real signal.
+func TestNoReorderWhenRolesAreMissing(t *testing.T) {
+	live := liveMatching()
+	live.Roles = []LiveRole{{Name: "wly", Managed: true}, {Name: "@everyone"}}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range p.Actions {
+		if a.Kind == ReorderRoles {
+			t.Fatalf("reordered on a server with no roles yet: %s", a.Detail)
+		}
+	}
+}
