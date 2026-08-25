@@ -284,3 +284,94 @@ func TestParseLifecycle(t *testing.T) {
 		t.Errorf("stop line -> %v/%v", e.Kind, ok)
 	}
 }
+
+// The exact lines the live server produced on 2026-08-25. spark answers on its
+// own worker thread, so these arrive in latest.log and never in the RCON reply,
+// which is the whole reason the bridge has to read them.
+func TestParseSpark(t *testing.T) {
+	const (
+		tpsLine  = `[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  20.0, 20.0, 20.0, *20.0, *20.0`
+		tickLine = `[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  0.6/0.7/1.0/1.6;  0.6/0.8/1.0/2.8`
+	)
+
+	tps, ok := ParseSpark(tpsLine)
+	if !ok || !tps.HasTPS {
+		t.Fatalf("TPS line not read: %v %v", tps, ok)
+	}
+	if len(tps.TPS) != 5 {
+		t.Fatalf("got %d figures, want 5", len(tps.TPS))
+	}
+	// The starred ones are estimates, and must still parse as numbers.
+	if tps.TPS[3] != 20.0 || tps.TPS[4] != 20.0 {
+		t.Errorf("starred estimates did not parse: %v", tps.TPS)
+	}
+	if v, ok := tps.TPS1m(); !ok || v != 20.0 {
+		t.Errorf("TPS1m = %v %v", v, ok)
+	}
+
+	tick, ok := ParseSpark(tickLine)
+	if !ok || !tick.HasMSPT {
+		t.Fatalf("tick line not read: %v %v", tick, ok)
+	}
+	// min/med/95%ile/max over the ONE MINUTE window, the second group.
+	if tick.MSPT95 != 1.0 {
+		t.Errorf("MSPT95 = %v, want the 1m group's 95%%ile of 1.0", tick.MSPT95)
+	}
+}
+
+// Each line is matched on its shape, so a heading, a blank or another thread's
+// output cannot be mistaken for figures.
+func TestParseSparkIgnores(t *testing.T) {
+	for _, line := range []string{
+		`[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡] TPS from last 5s, 10s, 1m, 5m, 15m:`,
+		`[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡] `,
+		`[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  8%, 4%, 12%  (system)`,
+		// Another mod printing numbers is not tick health.
+		`[12:32:01] [Server thread/INFO]: [⚡]  20.0, 20.0, 20.0, 20.0, 20.0`,
+		`[12:32:01] [Server thread/INFO]: kon fell from a high place`,
+	} {
+		if got, ok := ParseSpark(line); ok {
+			t.Errorf("read %q as tick health: %+v", line, got)
+		}
+	}
+}
+
+// A death or a join must never be read as spark output, and vice versa.
+func TestSparkAndEventsDoNotOverlap(t *testing.T) {
+	spark := `[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  0.6/0.7/1.0/1.6;  0.6/0.8/1.0/2.8`
+	if e, ok := Parse(spark); ok {
+		t.Errorf("spark output parsed as an event: %v", e.Kind)
+	}
+	death := `[12:00:01] [Server thread/INFO]: kon fell from a high place`
+	if tk, ok := ParseSpark(death); ok {
+		t.Errorf("a death parsed as tick health: %+v", tk)
+	}
+}
+
+// A figure that matches the shape but is not a number must be refused, not
+// half-read. "1.2.3" gets past [\d.]+ and dies in ParseFloat, which is exactly
+// the case a shape-based matcher has to handle.
+func TestParseSparkRefusesMalformedFigures(t *testing.T) {
+	for _, line := range []string{
+		`[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  1.2.3, 20.0, 20.0, 20.0, 20.0`,
+		`[12:32:01] [spark-worker-pool-1-thread-1/INFO]: [⚡]  0.6/0.7/1.0/1.6;  0.6/0.8/1.2.3/2.8`,
+	} {
+		if got, ok := ParseSpark(line); ok {
+			t.Errorf("accepted a malformed figure from %q: %+v", line, got)
+		}
+	}
+}
+
+// TPS1m must say "no" rather than return a zero that reads as a dead server.
+func TestTPS1mWithoutFigures(t *testing.T) {
+	if _, ok := (Tick{}).TPS1m(); ok {
+		t.Error("claimed a TPS figure with none read")
+	}
+	if _, ok := (Tick{HasTPS: true, TPS: []float64{20, 20}}).TPS1m(); ok {
+		t.Error("claimed a 1m figure from a short list")
+	}
+	v, ok := Tick{HasTPS: true, TPS: []float64{1, 2, 3, 4, 5}}.TPS1m()
+	if !ok || v != 3 {
+		t.Errorf("TPS1m = %v %v, want the third figure", v, ok)
+	}
+}

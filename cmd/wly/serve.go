@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -86,6 +88,17 @@ type daemon struct {
 	// minute and a release happens weekly.
 	pack   string
 	packAt time.Time
+	// downSince is when wly FIRST SAW the server down, which is not the same as
+	// when it fell over and is the only version of that fact anything here can
+	// honestly claim. Nothing on the box records the moment a crash happened,
+	// and the board refreshes every minute, so this is never more than a minute
+	// out. Cleared the moment it answers again.
+	downSince time.Time
+	// tick is the last tick health spark reported, and when. spark answers on a
+	// worker thread, so these arrive through the LOG BRIDGE rather than in the
+	// RCON reply, which is why the board and the bridge have to share them.
+	tick   mcevents.Tick
+	tickAt time.Time
 }
 
 func runServe(args []string, out io.Writer) error {
@@ -109,11 +122,12 @@ func runServe(args []string, out io.Writer) error {
 	if *once {
 		d.refreshStatus(ctx)
 		d.refreshSpend(ctx)
+		d.checkRelease(ctx)
 		return nil
 	}
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){d.bridge, d.statusLoop, d.spendLoop} {
+	for _, loop := range []func(context.Context){d.bridge, d.statusLoop, d.spendLoop, d.releaseLoop} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -209,6 +223,21 @@ func (d *daemon) bridge(ctx context.Context) {
 	t := &logtail.Tailer{Path: d.cfg.Server.LogPath}
 	for ctx.Err() == nil {
 		err := t.Follow(ctx, func(line string) {
+			// spark first: its output is not an event and Parse would never
+			// match it, but checking here keeps the bridge the single place
+			// that reads the log.
+			if tk, ok := mcevents.ParseSpark(line); ok {
+				d.mu.Lock()
+				if tk.HasTPS {
+					d.tick.TPS, d.tick.HasTPS = tk.TPS, true
+				}
+				if tk.HasMSPT {
+					d.tick.MSPT95, d.tick.HasMSPT = tk.MSPT95, true
+				}
+				d.tickAt = time.Now()
+				d.mu.Unlock()
+				return
+			}
 			ev, ok := mcevents.Parse(line)
 			if !ok {
 				return
@@ -379,6 +408,7 @@ func (d *daemon) refreshStatus(ctx context.Context) {
 	d.mu.Unlock()
 
 	data := discord.StatusData{
+		Strip:       d.cfg.Surfaces.FeedStrip,
 		MapURL:      d.cfg.Surfaces.MapURL,
 		MCVersion:   d.cfg.Channels["stable"].MCVersion,
 		PackVersion: d.packVersion(),
@@ -391,12 +421,27 @@ func (d *daemon) refreshStatus(ctx context.Context) {
 		// RCON refusing is the clearest "not serving" signal available. It
 		// covers stopped, starting and wedged alike, and all three are "you
 		// cannot join right now", which is what a player needs to know.
+		//
+		// "down" on its own gives a player no way to tell a blip from an outage
+		// they should stop waiting on, so the board says since when. The stamp
+		// is first-observed rather than actual, because actual is not recorded
+		// anywhere.
+		d.mu.Lock()
+		if d.downSince.IsZero() {
+			d.downSince = time.Now()
+		}
+		d.up, data.Since = false, d.downSince
+		d.mu.Unlock()
+
 		data.Up = false
 		d.postStatus(data)
 		return
 	}
 	defer func() { _ = c.Close() }()
 
+	d.mu.Lock()
+	d.up, d.downSince = true, time.Time{}
+	d.mu.Unlock()
 	data.Up = true
 	if lat, err := rcon.ServerThreadLatency(c); err == nil {
 		data.Latency = lat
@@ -406,6 +451,25 @@ func (d *daemon) refreshStatus(ctx context.Context) {
 	}
 	if online, err := rcon.Players(c); err == nil {
 		data.Online = online.Players
+	}
+	// Ask spark for fresh numbers. The reply comes back EMPTY and that is
+	// expected: spark answers on a worker thread and the figures reach the
+	// bridge through latest.log a moment later, so this call is a trigger
+	// rather than a query. The board therefore shows the previous minute's
+	// reading, which is what "numbers refresh every minute" already promises.
+	_, _ = c.Exec("spark tps")
+
+	d.mu.Lock()
+	tick, tickAt := d.tick, d.tickAt
+	d.mu.Unlock()
+	// Stale readings are dropped rather than shown. A frozen 20.0 TPS from
+	// before an outage is worse than no figure, which is the whole reason
+	// HasTick exists.
+	if !tickAt.IsZero() && time.Since(tickAt) < 5*time.Minute {
+		if tps, ok := tick.TPS1m(); ok && tick.HasMSPT {
+			data.TPS, data.MSPTp95 = tps, tick.MSPT95
+			data.HasTick, data.TickFrom = true, "spark"
+		}
 	}
 	if day, err := rcon.WorldDay(c); err == nil {
 		data.WorldDay = day
@@ -512,6 +576,7 @@ func (d *daemon) refreshSpend(ctx context.Context) {
 	}
 	now := time.Now()
 	data := discord.SpendData{
+		Strip:         d.cfg.Surfaces.FeedStrip,
 		Day:           now,
 		Budget:        d.budget,
 		Currency:      "EUR",
@@ -564,4 +629,123 @@ func (d *daemon) postSpend(data discord.SpendData) {
 	if _, err := d.api.upsertSurface(d.channel["spend"], p); err != nil {
 		fmt.Fprintf(d.out, "spend: %v\n", err)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The release post
+// ---------------------------------------------------------------------------
+
+// releaseLoop watches the published pack.toml and announces a new version.
+//
+// The announcement lives here rather than in the pack repo's release workflow,
+// deliberately and for two reasons the pack's own workflow comment records: the
+// bot token stays out of GitHub entirely, and a pack published BY HAND still
+// announces. One code path rather than two.
+//
+// Ten minutes, because a pack release is a weekly event and the server itself
+// only picks the pack up on its next restart. Polling faster would be forty
+// pointless HTTP requests an hour to learn the same string.
+func (d *daemon) releaseLoop(ctx context.Context) {
+	t := time.NewTicker(10 * time.Minute)
+	defer t.Stop()
+	d.checkRelease(ctx)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			d.checkRelease(ctx)
+		}
+	}
+}
+
+func (d *daemon) checkRelease(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	channel := d.channel["release"]
+	url := d.cfg.Channels["stable"].PackURL
+	if channel == "" || url == "" {
+		return
+	}
+
+	p, err := bench.FetchPack(url)
+	if err != nil || p.Version == "" {
+		return // an unreachable pack site is not news, and not an incident
+	}
+
+	announced, err := d.alreadyAnnounced(channel, p.Version)
+	if err != nil {
+		// Not knowing is a reason to say nothing. Posting on a failed read
+		// would repost the same release every ten minutes for ever, which is
+		// far worse than a late announcement.
+		fmt.Fprintf(d.out, "release: could not check what is already posted: %v\n", err)
+		return
+	}
+	if announced {
+		return
+	}
+
+	payload, err := discord.ResolveEmoji(discord.Release(discord.ReleaseData{
+		Version:     p.Version,
+		MCVersion:   p.Minecraft,
+		ModCount:    d.modCount(url),
+		PackPageURL: d.cfg.Surfaces.PackPage,
+		Strip:       d.cfg.Surfaces.FeedStrip,
+		// Added, Updated and Removed are deliberately empty. What changed in a
+		// pack is a human sentence, and deriving one from a file list produces
+		// exactly the mod-list flavour the voice rules forbid. The surface
+		// omits the block rather than inventing it.
+	}), d.emoji)
+	if err != nil {
+		fmt.Fprintf(d.out, "release: %v\n", err)
+		return
+	}
+	if err := d.api.do("POST", "/channels/"+channel+"/messages", payload, nil); err != nil {
+		fmt.Fprintf(d.out, "release: %v\n", err)
+		return
+	}
+	fmt.Fprintf(d.out, "announced pack %s\n", p.Version)
+}
+
+// alreadyAnnounced reports whether this version has been posted.
+//
+// Discord is the store, the same as it is for the pinned surfaces: a version
+// recorded anywhere else is a second source of truth that can disagree with
+// what people can actually see in the channel, and its failure mode is
+// announcing the same release twice or never.
+//
+// The version is searched for in the raw message JSON rather than in `content`,
+// because a Components V2 message HAS no content: the text lives inside nested
+// components, and reading `content` would find nothing and reannounce for ever.
+func (d *daemon) alreadyAnnounced(channelID, version string) (bool, error) {
+	var msgs []json.RawMessage
+	if err := d.api.do("GET", "/channels/"+channelID+"/messages?limit=20", nil, &msgs); err != nil {
+		return false, err
+	}
+	for _, m := range msgs {
+		if strings.Contains(string(m), "pack "+discord.VersionLabel(version)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// modCount counts what the published index actually lists, so the number on the
+// card is the pack's own rather than one somebody typed.
+//
+// A failure returns 0 and the card says "0 mods", which is wrong-looking enough
+// to notice; the alternative is holding the whole announcement over a count.
+func (d *daemon) modCount(packURL string) int {
+	idx := packURL
+	if i := strings.LastIndex(idx, "/"); i >= 0 {
+		idx = idx[:i+1] + "index.toml"
+	}
+	resp, err := (&http.Client{Timeout: 15 * time.Second}).Get(idx)
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return strings.Count(string(raw), `file = "mods/`)
 }
