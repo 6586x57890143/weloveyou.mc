@@ -4,7 +4,7 @@
     "direction": "b",
     "title": "Card",
     "status": "chosen 2026-08-24",
-    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. A regular player types no commands at all: step 3 is a button that opens a modal, and the join attempt itself is the proof."
+    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. A regular player types nothing at all: step 3 has no button because nothing handles interactions, and it needs none. Mojang authenticates a join attempt before the whitelist is consulted, so the attempt itself is the proof and wly reads it off the log."
   },
   "flags": 32768,
   "components": [
@@ -63,19 +63,8 @@
           ]
         },
         {
-          "type": 9,
-          "components": [
-            {
-              "type": 10,
-              "content": "### 3. link and join\npress the button, give your minecraft name, then connect. your first join is what proves it is you.\n```\n158.180.53.71\n```"
-            }
-          ],
-          "accessory": {
-            "type": 2,
-            "style": 1,
-            "label": "link my account",
-            "custom_id": "link_start"
-          }
+          "type": 10,
+          "content": "### 3. just try to join\n```\n158.180.53.71\n```\nyou will be turned away the first time, that is expected. wly sees the attempt and asks an admin to let you in, so there is nothing to fill in and nothing to send."
         },
         {
           "type": 14,

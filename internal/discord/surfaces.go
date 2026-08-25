@@ -29,9 +29,10 @@ type GetStartedData struct {
 // GetStarted is direction B, chosen 2026-08-24: a Section per step, each with
 // its own accessory.
 //
-// A regular player types nothing. Step 3 is a button that opens a modal and the
-// join attempt itself is the proof, because a server whose onboarding is "type
-// this exactly" loses people at the point it can least afford to.
+// A regular player types nothing, and step 3 is where that is actually earned:
+// the join attempt itself is the proof, so there is no name to give and no
+// button to press. A server whose onboarding is "type this exactly" loses people
+// at the point it can least afford to.
 func GetStarted(d GetStartedData) Payload {
 	return Container(AccentHeart,
 		Text("# wly <:heart:>\n-# minecraft %s · whitelist only", d.MinecraftVersion),
@@ -46,8 +47,20 @@ func GetStarted(d GetStartedData) Payload {
 			Text("### 2. import the instance\n`Add Instance` → `Import from zip` → paste the link.")),
 		Gallery(d.PrismImageURL,
 			"Prism Launcher's Add Instance window, Import from zip selected, with the link field outlined."),
-		Section(ActionButton("link my account", "link_start"),
-			Text("### 3. link and join\npress the button, give your minecraft name, then connect. your first join is what proves it is you.\n```\n%s\n```", d.ServerAddress)),
+		// NO BUTTON HERE, and that is a correction rather than a simplification.
+		//
+		// This step used to be a primary button opening a modal. Nothing handles
+		// interactions: there is no gateway and no interactions endpoint, so
+		// every player who pressed it got "This interaction failed". guild.toml
+		// states the rule it broke: a button that does nothing when pressed is
+		// worse than an absent one, because a player has already committed to
+		// it. It was live in #start-here for exactly that long.
+		//
+		// The flow needs no interaction anyway, which is what makes this the
+		// right shape rather than a stopgap. Mojang authenticates a join attempt
+		// BEFORE the whitelist is consulted, so the attempt itself proves who
+		// they are and wly reads it off the log. A player still types nothing.
+		Text("### 3. just try to join\n```\n%s\n```\nyou will be turned away the first time, that is expected. wly sees the attempt and asks an admin to let you in, so there is nothing to fill in and nothing to send.", d.ServerAddress),
 		Separator(true, 1),
 		// The pre-launch disclosure is non-negotiable. Importing a Prism
 		// instance runs its pre-launch command with no warning from Prism, and
@@ -427,4 +440,31 @@ func Event(d EventData) Payload {
 		card = append([]Component{Gallery(d.Strip, "")}, card...)
 	}
 	return Container(accent, card...)
+}
+
+// JoinRequestData is somebody who tried to get in and could not.
+type JoinRequestData struct {
+	Player string
+	UUID   string
+	Strip  string
+}
+
+// JoinRequest is how a newcomer reaches an admin without typing anything.
+//
+// It replaces the modal that never existed. Mojang authenticates a join attempt
+// BEFORE the whitelist is consulted, so a rejected attempt still proves who the
+// player is, and the log line carries the uuid. That is the whole registration
+// flow: they try, wly sees it, an admin says yes.
+//
+// The command is spelled out in full because the admin reading this is on a
+// phone half the time, and a card that says "whitelist them" and leaves the
+// exact syntax as an exercise is a card that gets ignored until later.
+func JoinRequest(d JoinRequestData) Payload {
+	return Container(AccentBase,
+		Text("<:player:> **%s** tried to join and is not on the whitelist\n-# %s",
+			d.Player, d.UUID),
+		divider(d.Strip),
+		Text("```\nwhitelist add %s\n```\n-# mojang already proved this is them, "+
+			"so the name is theirs. run it in game or over rcon.", d.Player),
+	)
 }

@@ -99,6 +99,9 @@ type daemon struct {
 	// RCON reply, which is why the board and the bridge have to share them.
 	tick   mcevents.Tick
 	tickAt time.Time
+	// asked remembers who has already been put in front of an admin, so a
+	// client retrying every few seconds does not fill #ops with one person.
+	asked map[string]bool
 }
 
 func runServe(args []string, out io.Writer) error {
@@ -262,6 +265,12 @@ func (d *daemon) handle(ctx context.Context, ev mcevents.Event, posts chan<- dis
 		d.mu.Lock()
 		d.uuids[ev.Player] = ev.UUID
 		d.mu.Unlock()
+		// This line is the whole registration flow. Mojang authenticates a join
+		// attempt BEFORE the whitelist is consulted, so a player who is turned
+		// away still proved who they are on the way in, and the line carries
+		// their uuid. Nobody has to type anything, and nothing had to be granted
+		// in advance to collect it.
+		d.askToLetThemIn(ev.Player, ev.UUID)
 
 	case mcevents.ServerReady:
 		d.mu.Lock()
@@ -375,6 +384,76 @@ func (d *daemon) firstJoin(player string) bool {
 	}
 	_, err := os.Stat(statsPath(uuid))
 	return os.IsNotExist(err)
+}
+
+// askToLetThemIn posts a newcomer to #ops so an admin can whitelist them.
+//
+// Silent for anyone already on the list, which is almost every join: the point
+// is the stranger, not the regular. Silent too when the whitelist cannot be
+// read, because guessing "not whitelisted" would post every single join to #ops
+// and train everyone to ignore the channel.
+func (d *daemon) askToLetThemIn(player, uuid string) {
+	if player == "" || uuid == "" {
+		return
+	}
+	ops := d.channel["spend"] // #ops, the admin channel
+	if ops == "" {
+		return
+	}
+	listed, ok := whitelisted(player)
+	if !ok || listed {
+		return
+	}
+
+	// Once per player per run of the daemon. A client that retries every few
+	// seconds would otherwise fill #ops with the same person.
+	d.mu.Lock()
+	if d.asked == nil {
+		d.asked = map[string]bool{}
+	}
+	already := d.asked[uuid]
+	d.asked[uuid] = true
+	d.mu.Unlock()
+	if already {
+		return
+	}
+
+	p, err := discord.ResolveEmoji(discord.JoinRequest(discord.JoinRequestData{
+		Player: player, UUID: uuid, Strip: d.cfg.Surfaces.FeedStrip,
+	}), d.emoji)
+	if err != nil {
+		fmt.Fprintf(d.out, "join request: %v\n", err)
+		return
+	}
+	if err := d.api.do("POST", "/channels/"+ops+"/messages", p, nil); err != nil {
+		fmt.Fprintf(d.out, "join request: %v\n", err)
+		return
+	}
+	fmt.Fprintf(d.out, "asked ops to whitelist %s\n", player)
+}
+
+// whitelisted reads the server's own whitelist.json, which wly has mounted
+// read-only at /mc. The second return is false when the file could not be read
+// at all, which is different from "not on the list" and must not be treated as
+// it.
+func whitelisted(player string) (bool, bool) {
+	raw, err := os.ReadFile("/mc/whitelist.json")
+	if err != nil {
+		return false, false
+	}
+	var entries []struct {
+		Name string `json:"name"`
+		UUID string `json:"uuid"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return false, false
+	}
+	for _, e := range entries {
+		if strings.EqualFold(e.Name, player) {
+			return true, true
+		}
+	}
+	return false, true
 }
 
 // statsPath is where the server keeps a player's own statistics. wly mounts
