@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -70,6 +71,7 @@ type daemon struct {
 
 	rconPassword string
 	budget       float64
+	adminRole    string
 
 	// mu guards everything below, which the bridge and the status loop both
 	// touch.
@@ -102,7 +104,13 @@ type daemon struct {
 	// asked remembers who has already been put in front of an admin, so a
 	// client retrying every few seconds does not fill #ops with one person.
 	asked map[string]bool
+	// opsSeen is the newest message wly has already looked at in #ops, so a
+	// poll returns only what is new.
+	opsSeen string
 }
+
+// adminRole is the role id an approval must carry. Resolved once at startup
+// from the name guild.toml declares.
 
 func runServe(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
@@ -130,7 +138,9 @@ func runServe(args []string, out io.Writer) error {
 	}
 
 	var wg sync.WaitGroup
-	for _, loop := range []func(context.Context){d.bridge, d.statusLoop, d.spendLoop, d.releaseLoop} {
+	for _, loop := range []func(context.Context){
+		d.bridge, d.statusLoop, d.spendLoop, d.releaseLoop, d.opsLoop,
+	} {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -189,6 +199,24 @@ func newDaemon(guildPath, wlyPath string, out io.Writer) (*daemon, error) {
 	d.emoji = map[string]string{}
 	for _, e := range emojis {
 		d.emoji[e.Name] = e.ID
+	}
+
+	// The admin role, by the name guild.toml declares rather than an id pasted
+	// into config. Absent means every approval is refused, which is the right
+	// way round: an unknown role must not read as "probably fine".
+	var roles []struct{ ID, Name string }
+	if err := d.api.do("GET", "/guilds/"+g.Meta.ID+"/roles", nil, &roles); err != nil {
+		return nil, err
+	}
+	for _, r := range roles {
+		for _, want := range g.Roles {
+			if want.Manual && r.Name == want.Name {
+				d.adminRole = r.ID
+			}
+		}
+	}
+	if d.adminRole == "" {
+		fmt.Fprintln(out, "no manual (admin) role found; approvals in #ops will be refused")
 	}
 	return d, nil
 }
@@ -831,4 +859,159 @@ func (d *daemon) modCount(packURL string) int {
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	return strings.Count(string(raw), `file = "mods/`)
+}
+
+// ---------------------------------------------------------------------------
+// Admin approvals in #ops
+// ---------------------------------------------------------------------------
+
+// opsLoop watches #ops for an admin approving somebody.
+//
+// Polling rather than a button, because a button is an interaction and nothing
+// handles interactions: no gateway, no interactions endpoint. A button here
+// would fail exactly the way the one on the welcome card failed. This reuses the
+// reading wly already does to find its own posts, and ten seconds is well inside
+// what anybody notices while typing in a chat window.
+func (d *daemon) opsLoop(ctx context.Context) {
+	ops := d.channel["spend"] // #ops
+	if ops == "" {
+		return
+	}
+	// Start from NOW, not from the beginning. Otherwise a restart replays every
+	// approval ever typed in the channel and re-runs each one, which is the same
+	// mistake the log tailer avoids by starting at the end.
+	if last, err := d.newestMessage(ops); err == nil {
+		d.mu.Lock()
+		d.opsSeen = last
+		d.mu.Unlock()
+	}
+
+	t := time.NewTicker(10 * time.Second)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			d.checkOps(ctx, ops)
+		}
+	}
+}
+
+func (d *daemon) newestMessage(channelID string) (string, error) {
+	var msgs []struct {
+		ID string `json:"id"`
+	}
+	if err := d.api.do("GET", "/channels/"+channelID+"/messages?limit=1", nil, &msgs); err != nil {
+		return "", err
+	}
+	if len(msgs) == 0 {
+		return "", nil
+	}
+	return msgs[0].ID, nil
+}
+
+// opsMessage is a message in #ops, narrowed to what an approval needs.
+type opsMessage struct {
+	ID      string `json:"id"`
+	Content string `json:"content"`
+	Author  struct {
+		ID       string `json:"id"`
+		Username string `json:"username"`
+		Bot      bool   `json:"bot"`
+	} `json:"author"`
+	Member struct {
+		Roles []string `json:"roles"`
+	} `json:"member"`
+}
+
+func (d *daemon) checkOps(ctx context.Context, channelID string) {
+	if ctx.Err() != nil {
+		return
+	}
+	d.mu.Lock()
+	after := d.opsSeen
+	d.mu.Unlock()
+
+	path := "/channels/" + channelID + "/messages?limit=20"
+	if after != "" {
+		path += "&after=" + after
+	}
+	var msgs []opsMessage
+	if err := d.api.do("GET", path, nil, &msgs); err != nil {
+		return // a failed read is not news; the next tick tries again
+	}
+
+	// Discord returns newest first; act in the order they were typed.
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		d.mu.Lock()
+		d.opsSeen = m.ID
+		d.mu.Unlock()
+
+		if m.Author.Bot {
+			continue // our own cards, and anything else automated
+		}
+		player, ok := discord.ParseOpsCommand(m.Content)
+		if !ok {
+			continue
+		}
+		// The channel is already admin-only, and that is Discord's enforcement
+		// rather than ours. Checking the role as well is defence in depth: a
+		// permission edit, an integration, or a channel someone widens by hand
+		// should not silently become a route to an operator command.
+		if !d.isAdmin(m.Member.Roles) {
+			fmt.Fprintf(d.out, "ops: ignoring %q from %s, who is not an admin\n",
+				m.Content, m.Author.Username)
+			continue
+		}
+		d.whitelist(channelID, player, m.Author.Username)
+	}
+}
+
+func (d *daemon) isAdmin(roles []string) bool {
+	if d.adminRole == "" {
+		return false // unknown means no, never "probably fine"
+	}
+	return slices.Contains(roles, d.adminRole)
+}
+
+// whitelist runs the command and says what happened, either way.
+func (d *daemon) whitelist(channelID, player, by string) {
+	var failure string
+	c, err := d.dial()
+	if err != nil {
+		failure = "the server is not answering right now"
+	} else {
+		defer func() { _ = c.Close() }()
+		// player has already been through ParseOpsCommand, which permits only
+		// [A-Za-z0-9_]{1,16}: no space, no newline, nothing that ends one
+		// console command and starts another.
+		out, execErr := c.Exec("whitelist add " + player)
+		switch {
+		case execErr != nil:
+			failure = "rcon refused the command"
+		case strings.Contains(strings.ToLower(out), "does not exist"),
+			strings.Contains(strings.ToLower(out), "that player"):
+			// Mojang could not resolve the name, which is nearly always a typo
+			// and is worth saying rather than reporting success.
+			failure = strings.TrimSpace(out)
+		}
+	}
+
+	p, err := discord.ResolveEmoji(discord.WhitelistResult(discord.WhitelistResultData{
+		Player: player, Err: failure, Strip: d.cfg.Surfaces.FeedStrip,
+	}), d.emoji)
+	if err != nil {
+		fmt.Fprintf(d.out, "ops: %v\n", err)
+		return
+	}
+	if err := d.api.do("POST", "/channels/"+channelID+"/messages", p, nil); err != nil {
+		fmt.Fprintf(d.out, "ops: %v\n", err)
+	}
+	if failure == "" {
+		fmt.Fprintf(d.out, "whitelisted %s, approved by %s\n", player, by)
+	} else {
+		fmt.Fprintf(d.out, "could not whitelist %s (%s), asked by %s\n", player, failure, by)
+	}
 }
