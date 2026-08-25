@@ -227,6 +227,28 @@ services:
       docker-proxy:
         condition: service_started
 
+    # Runs as the SAME uid the Minecraft container writes as, because the
+    # server's data directory is not world-readable and the bridge has to read
+    # the log through it:
+    #
+    #   /data              drwxr-x---  minecraft minecraft   <- 0750, no traverse
+    #   /data/logs/latest.log  -rw-rw-r--  minecraft minecraft
+    #
+    # The log itself is world-readable, so the failure is the DIRECTORY: uid
+    # 65532 cannot traverse /data to reach it. Proved on the box by reading the
+    # same volume from a throwaway container as each uid: 1000 reads it, 65532
+    # gets "Permission denied".
+    #
+    # The distroless image runs as nonroot (65532) by default, which is why this
+    # only surfaced the first time the bridge ran. 1000 is the itzg default and
+    # is unprivileged in exactly the same way; nothing below is weakened by it,
+    # and wly writes nothing anywhere, which is what read_only asserts.
+    #
+    # The alternative was chmod 0755 on the server's own data directory, which
+    # widens what every other process on the box can read, to save typing one
+    # line here.
+    user: "1000:1000"
+
     read_only: true
     cap_drop: ["ALL"]
     security_opt: ["no-new-privileges:true"]
