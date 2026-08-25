@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"weloveyou-mc/internal/discord"
@@ -87,10 +88,42 @@ func TestMapBuildsOnceThereIsARender(t *testing.T) {
 	}
 }
 
+// recorder is what the fake Discord wrote down.
+//
+// Mutex-guarded, and that is not belt and braces: httptest serves each request
+// on its OWN goroutine, so a handler appending here races any test reading it.
+// The tests that poll while a background loop is still posting hit this every
+// time under -race, which is exactly the kind of test-only race that hides a
+// real one in the noise.
+type recorder struct {
+	mu     sync.Mutex
+	paths  []string
+	bodies []string
+}
+
+func (r *recorder) add(path, body string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.paths = append(r.paths, path)
+	r.bodies = append(r.bodies, body)
+}
+
+func (r *recorder) Paths() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.paths...)
+}
+
+func (r *recorder) Bodies() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.bodies...)
+}
+
 // surfaceServer stands in for Discord and records what was written.
-func surfaceServer(t *testing.T, existing string) (*[]string, *[]string) {
+func surfaceServer(t *testing.T, existing string) *recorder {
 	t.Helper()
-	var paths, bodies []string
+	rec := &recorder{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/users/@me":
@@ -104,22 +137,25 @@ func surfaceServer(t *testing.T, existing string) (*[]string, *[]string) {
 		default:
 			raw := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(raw)
-			paths = append(paths, r.Method+" "+r.URL.Path)
-			bodies = append(bodies, string(raw))
+			rec.add(r.Method+" "+r.URL.Path, string(raw))
 			_, _ = w.Write([]byte(`{"id":"newmsg"}`))
 		}
 	}))
+	// LIFO matters here. These are registered when the fake is built, so they
+	// run LAST, after any cleanup a test registers afterwards to stop a
+	// background loop. Restoring discordAPI while a goroutine is still reading
+	// it through discordClient.do is the second race -race found.
 	t.Cleanup(srv.Close)
 	old := discordAPI
 	discordAPI = srv.URL
 	t.Cleanup(func() { discordAPI = old })
-	return &paths, &bodies
+	return rec
 }
 
 // The first post is a one-way door: Components V2 sets its flag irreversibly on
 // a message, so the flag has to be on the very first POST.
 func TestSurfacesPostsWithTheComponentsV2Flag(t *testing.T) {
-	paths, bodies := surfaceServer(t, `[]`)
+	rec := surfaceServer(t, `[]`)
 	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
 
 	var out bytes.Buffer
@@ -128,12 +164,12 @@ func TestSurfacesPostsWithTheComponentsV2Flag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	joined := strings.Join(*paths, " ")
+	joined := strings.Join(rec.Paths(), " ")
 	if !strings.Contains(joined, "POST /channels/") {
-		t.Fatalf("nothing was posted: %v", *paths)
+		t.Fatalf("nothing was posted: %v", rec.Paths())
 	}
 	var sent map[string]any
-	if err := json.Unmarshal([]byte((*bodies)[0]), &sent); err != nil {
+	if err := json.Unmarshal([]byte(rec.Bodies()[0]), &sent); err != nil {
 		t.Fatal(err)
 	}
 	if sent["flags"] != float64(discord.FlagComponentsV2) {
@@ -149,14 +185,14 @@ func TestSurfacesPostsWithTheComponentsV2Flag(t *testing.T) {
 		t.Errorf("the emoji placeholder was posted unresolved: %q", got)
 	}
 	if !strings.Contains(joined, "PUT /channels/") {
-		t.Errorf("the surface was never pinned: %v", *paths)
+		t.Errorf("the surface was never pinned: %v", rec.Paths())
 	}
 }
 
 // Edited in place, never reposted. A channel of superseded status boards is
 // worse than no status board.
 func TestSurfacesEditsItsOwnMessageRatherThanPosting(t *testing.T) {
-	paths, _ := surfaceServer(t, `[
+	rec := surfaceServer(t, `[
 		{"id":"m2","author":{"id":"someoneelse"}},
 		{"id":"m1","author":{"id":"botuser"}}
 	]`)
@@ -167,12 +203,12 @@ func TestSurfacesEditsItsOwnMessageRatherThanPosting(t *testing.T) {
 		"--wly", surfaceConfigFile(t, ""), "--apply"}, &out); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	joined := strings.Join(*paths, " ")
+	joined := strings.Join(rec.Paths(), " ")
 	if !strings.Contains(joined, "PATCH /channels/1541487310070087781/messages/m1") {
-		t.Fatalf("it did not edit its own message: %v", *paths)
+		t.Fatalf("it did not edit its own message: %v", rec.Paths())
 	}
 	if strings.Contains(joined, "POST /channels/") {
-		t.Errorf("it reposted instead of editing: %v", *paths)
+		t.Errorf("it reposted instead of editing: %v", rec.Paths())
 	}
 	if !strings.Contains(out.String(), "edited") {
 		t.Errorf("output did not say it edited: %s", out.String())
@@ -180,7 +216,7 @@ func TestSurfacesEditsItsOwnMessageRatherThanPosting(t *testing.T) {
 }
 
 func TestSurfacesPrintsAndPostsNothingWithoutApply(t *testing.T) {
-	paths, _ := surfaceServer(t, `[]`)
+	rec := surfaceServer(t, `[]`)
 	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
 
 	var out bytes.Buffer
@@ -188,8 +224,8 @@ func TestSurfacesPrintsAndPostsNothingWithoutApply(t *testing.T) {
 		"--wly", surfaceConfigFile(t, "")}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(*paths) != 0 {
-		t.Errorf("a dry run wrote to Discord: %v", *paths)
+	if len(rec.Paths()) != 0 {
+		t.Errorf("a dry run wrote to Discord: %v", rec.Paths())
 	}
 	if !strings.Contains(out.String(), "posted nothing") {
 		t.Errorf("output did not say it changed nothing: %s", out.String())
