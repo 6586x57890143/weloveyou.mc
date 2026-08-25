@@ -170,9 +170,10 @@ services:
     image: "${WLY_IMAGE:-ghcr.io/6586x57890143/weloveyou.mc:latest}"
     container_name: wly
     restart: unless-stopped
-    # Opt-in until the daemon does something. `wly serve` is a phase-0 skeleton
-    # that exits immediately, so starting it by default would just restart-loop
-    # and make every deploy look broken. Start it with:
+    # Opt-in. `wly serve` is real now: it runs the log bridge, the status board
+    # and the spend post. It stays behind a profile because it needs
+    # WLY_DISCORD_TOKEN and a reconciled guild, and a box that has neither must
+    # still be able to run Minecraft. Start it with:
     #   docker compose --profile bot up -d
     profiles: ["bot"]
     # service_started, not service_healthy. `compose up -d` blocks on a
@@ -182,6 +183,8 @@ services:
     # so it does not need mc to be ready, only to exist.
     depends_on:
       mc:
+        condition: service_started
+      docker-proxy:
         condition: service_started
 
     read_only: true
@@ -194,14 +197,31 @@ services:
       WLY_CONFIG: /config/wly.toml
       WLY_RCON_PASSWORD: "${RCON_PASSWORD:?}"
       WLY_DISCORD_TOKEN: "${WLY_DISCORD_TOKEN:-}"
-      WLY_R2_ACCESS_KEY: "${WLY_R2_ACCESS_KEY:-}"
-      WLY_R2_SECRET_KEY: "${WLY_R2_SECRET_KEY:-}"
+      # The spend surface escalates against this, matching cost-push.sh on the
+      # box so two things reporting the same numbers cannot use different
+      # thresholds.
+      WLY_COST_BUDGET: "${WLY_COST_BUDGET:-5}"
+      # Read-only container inspection, through the proxy below and never
+      # through the host socket. Unset means uptime is simply unavailable and
+      # the status board shows none rather than inventing one.
+      DOCKER_HOST: "tcp://docker-proxy:2375"
+      # REMOVED: WLY_R2_ACCESS_KEY and WLY_R2_SECRET_KEY. CLAUDE.md records that
+      # R2 was superseded (commit c98aefb) and that these still passed through
+      # compose with nothing consuming them. A secret plumbed into a container
+      # that has no use for it is blast radius for free.
 
     volumes:
       - ../wly.toml:/config/wly.toml:ro
-      # Read-only: wly tails latest.log and reads squaremap's tiles. It has no
-      # business writing into the server's data directory.
+      # Read-only: wly tails latest.log, reads world/stats for first-join and
+      # the leaderboards, and reads squaremap's tiles. It has no business
+      # writing into the server's data directory, and the log bridge is the
+      # component most exposed to input nobody here controls.
       - mc-data:/mc:ro
+      # The cost report, written on the HOST by the wly-cost timer. It was
+      # never mounted, so the spend surface read /var/lib/wly/cost.json inside
+      # the container, found nothing, and would have reported "no cost report on
+      # the box at all" forever while the box had one all along.
+      - /var/lib/wly:/var/lib/wly:ro
       # REMOVED 2026-08-24, security review. This was
       #   - /var/run/docker.sock:/var/run/docker.sock
       # for lifecycle control: wly speaks the Docker Engine API over the socket
@@ -232,6 +252,61 @@ services:
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+  # Read-only Docker API, for one fact: when the Minecraft container started.
+  #
+  # The status board says "up <relative time>" and nothing else can answer it.
+  # The log's own "Done (12.345s)!" line carries NO DATE, only a wall clock, so
+  # anything derived from it is wrong across midnight, and the daemon usually
+  # starts long after the server and never sees that line at all.
+  #
+  # CLAUDE.md's security review (2026-08-24) removed the host socket bind mount
+  # from the wly service and said the replacement would be this proxy with
+  # CONTAINERS=1, POST=1. THIS GOES FURTHER: POST is off. Nothing wly does today
+  # creates, starts, stops or kills anything, so the proxy refuses all of it and
+  # a bug in the daemon parsing Discord input off the internet can read a
+  # container list and nothing else. Lifecycle control is a later phase and can
+  # raise this deliberately rather than inherit a permission nobody asked for.
+  #
+  # The proxy is the only thing that touches docker.sock, it takes it READ-ONLY,
+  # and it publishes no port: it is reachable on the compose network alone.
+  docker-proxy:
+    image: "${DOCKER_PROXY_IMAGE:-tecnativa/docker-socket-proxy:0.3.0}"
+    container_name: wly-docker-proxy
+    restart: unless-stopped
+    profiles: ["bot"]
+    environment:
+      # Allow: inspect a container. Everything else is denied by default and
+      # the dangerous verbs are denied explicitly, so a future image default
+      # cannot quietly widen this.
+      CONTAINERS: "1"
+      POST: "0"
+      EXEC: "0"
+      IMAGES: "0"
+      VOLUMES: "0"
+      NETWORKS: "0"
+      SERVICES: "0"
+      TASKS: "0"
+      SECRETS: "0"
+      CONFIGS: "0"
+      NODES: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      INFO: "0"
+      AUTH: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      DISTRIBUTION: "0"
+      PLUGINS: "0"
+      SESSION: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 64m
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options: { max-size: "5m", max-file: "2" }
 
   # The database. It holds exactly one fact that has no other home: which
   # Minecraft account belongs to which Discord account. Everything else wly

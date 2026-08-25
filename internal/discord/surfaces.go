@@ -65,11 +65,29 @@ type StatusData struct {
 	Online      []string
 	MapURL      string
 	WorldDay    int
-	TPS         float64
-	MSPTp95     float64
 	PackVersion string
 	MCVersion   string
 	NextBackup  time.Time
+
+	// TPS and MSPTp95 are only real when HasTick is true, which means something
+	// on the server can actually answer for tick health.
+	//
+	// NOTHING ON THIS SERVER CAN, TODAY. The board was designed around spark,
+	// and spark is pinned in the bench harness and is NOT in pack/stable:
+	// `spark tps` over RCON on the live server answers "Unknown or incomplete
+	// command". Fabric has no vanilla equivalent. So the fields stay, because
+	// the moment spark ships to pack/stable they are correct, and HasTick is
+	// what stops the board printing a confident 20.0 that nothing measured.
+	TPS      float64
+	MSPTp95  float64
+	HasTick  bool
+	TickFrom string // "spark", say. Named on the board so the number has a source.
+
+	// Latency is the RCON round trip, which is always available because RCON
+	// commands run ON THE SERVER THREAD. It is not MSPT and is never labelled
+	// as it, but it moves for the same reason MSPT moves, so it is the honest
+	// thing to show when nothing better exists.
+	Latency time.Duration
 }
 
 // Status is the one message that is edited in place forever and never reposted.
@@ -85,9 +103,21 @@ func Status(d StatusData) Payload {
 		accent = AccentBase
 	}
 
-	head := Text("# wly <:heart:>\n-# up %s · edited in place, never reposted", Rel(d.Since))
+	// A zero time is "we do not know", not the year 1. Rel() on one renders as
+	// "2026 years ago", which is what the first live post of this board actually
+	// said. Uptime is genuinely unknown when the daemon starts after the server
+	// and DOCKER_HOST is unset, and saying nothing is the honest version of that.
+	when := "edited in place, never reposted"
+	if !d.Since.IsZero() {
+		when = "up " + Rel(d.Since) + " · edited in place, never reposted"
+	}
+	head := Text("# wly <:heart:>\n-# %s", when)
 	if !d.Up {
-		head = Text("# wly <:heart:>\n-# down since %s", Rel(d.Since))
+		down := "down"
+		if !d.Since.IsZero() {
+			down = "down since " + Rel(d.Since)
+		}
+		head = Text("# wly <:heart:>\n-# %s", down)
 	}
 
 	who := "nobody right now"
@@ -95,16 +125,40 @@ func Status(d StatusData) Payload {
 		who = fmt.Sprintf("**%d** of us right now\n%s", n, strings.Join(d.Online, ", "))
 	}
 
+	// The world line says what it can actually measure. With a tick source it
+	// is TPS and p95; without one it is the server's own response time, named
+	// as response time. Printing an unmeasured 20.0 TPS would be exactly the
+	// "flag the JVM accepts and then ignores" failure, in a place every player
+	// reads.
+	world := fmt.Sprintf("### the world\nday **%d** · **%dms** server response",
+		d.WorldDay, d.Latency.Milliseconds())
+	if d.HasTick {
+		world = fmt.Sprintf("### the world\nday **%d** · **%.2f** TPS · **%.1fms** p95 tick",
+			d.WorldDay, d.TPS, d.MSPTp95)
+	}
+
 	return Container(accent,
 		head,
 		Separator(true, 1),
 		Section(LinkButton("open the map", d.MapURL), Text("### online\n%s", who)),
-		Text("### the world\nday **%d** · **%.2f** TPS · **%.1fms** p95 tick",
-			d.WorldDay, d.TPS, d.MSPTp95),
-		Text("### the pack\n**%s** · minecraft %s", d.PackVersion, d.MCVersion),
+		Text("%s", world),
+		// An unknown pack version renders as "**** · minecraft 1.21.1", where the
+		// empty bold collapses into a stray glyph. Say unknown instead: the
+		// first live post of this board showed the glyph and it read as
+		// corruption rather than as a missing value.
+		Text("### the pack\n%s · minecraft %s", boldOrUnknown(d.PackVersion), d.MCVersion),
 		Separator(false, 2),
 		Text("-# next backup %s. numbers refresh every minute.", Rel(d.NextBackup)),
 	)
+}
+
+// boldOrUnknown bolds a value, or says unknown when there is none. Empty bold
+// markers collapse into a stray glyph in Discord rather than into nothing.
+func boldOrUnknown(s string) string {
+	if s == "" {
+		return "unknown"
+	}
+	return "**" + s + "**"
 }
 
 // SpendData is /var/lib/wly/cost.json, plus the budget it is measured against.
@@ -237,6 +291,28 @@ func Map(d MapData) Payload {
 	)
 }
 
+// Discord gives no way to make these cards the same width, and three were tried.
+//
+// A Components V2 Container has no width property: it takes the width of its
+// widest child, capped at the message column. Measured in Discord's own message
+// font on 2026-08-25, the event lines are 152px, 171px and 184px, so the text
+// will never agree with itself. What was tried against the live guild:
+//
+//	a run of U+2007 FIGURE SPACE  -> STRIPPED. Discord removes it from message
+//	                                content entirely; the posted cards contained
+//	                                no figure space at all when read back
+//	a Separator on every card     -> no effect. A separator has no intrinsic
+//	                                width, so it cannot set one
+//	a Section with an accessory   -> no effect. The button sits after the text
+//	                                rather than pinning to a fixed column
+//
+// The only component with an intrinsic width is a Media Gallery, because an
+// image has real dimensions. That is why the get-started card is uniformly wide:
+// it embeds a 732px screenshot. Forcing it here would mean a fixed-width image
+// fetched on every feed post, which is a network round trip per death and a
+// visible strip whenever it fails to load. Not worth it for a chat feed, where
+// content-sized cards read as normal.
+//
 // EventKind is what happened. The accent and the icon both come from it, so a
 // death and an advancement cannot end up looking the same.
 type EventKind int
@@ -257,6 +333,11 @@ type EventData struct {
 	WorldDay int
 	X, Z     int
 	HasWhere bool
+
+	// Strip is a fixed-size image placed at the top of the card, and it is the
+	// only thing that makes every card the same width. See the note above Event.
+	// Empty means no strip, and the cards size to their text.
+	Strip string
 }
 
 // Event is a single feed post. These are not edited in place: the feed is a log,
@@ -285,5 +366,9 @@ func Event(d EventData) Payload {
 			foot = fmt.Sprintf("day %d · x %d, z %d", d.WorldDay, d.X, d.Z)
 		}
 	}
-	return Container(accent, Text("<:%s:> %s\n-# %s", icon, line, foot))
+	card := []Component{Text("<:%s:> %s\n-# %s", icon, line, foot)}
+	if d.Strip != "" {
+		card = append([]Component{Gallery(d.Strip, "")}, card...)
+	}
+	return Container(accent, card...)
 }

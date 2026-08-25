@@ -37,6 +37,22 @@ pack_page      = "https://weloveyou-pack.pages.dev/pack/stable/"
 prism_image    = "https://weloveyou-pack.pages.dev/assets/prism-import.png"
 map_image      = ""
 
+# The feed strip: a pink rule with the pixel heart, drawn by
+# scripts/feed-strip.py from icons.toml so it cannot drift from the emoji.
+#
+# It is LAYOUT, not decoration. A Components V2 Container has no width property
+# and takes the width of its widest child, so a feed of events renders ragged. A
+# Media Gallery image is the only component with an intrinsic width, which makes
+# every card carrying it exactly as wide as the image. Padding characters are
+# stripped by Discord and separators and section accessories do nothing; all
+# three were tried on the live guild first.
+#
+# Served from the repository over raw.githubusercontent, which is fine here
+# because Discord fetches an image once and then serves its own cached copy from
+# media.discordapp.net: players never touch GitHub. Empty disables it and the
+# cards go back to sizing themselves.
+feed_strip     = "https://raw.githubusercontent.com/6586x57890143/weloveyou.mc/main/assets/feed-strip.png"
+
 [discord]
 guild_id = ""
 # One pinned message per surface; wly edits in place rather than reposting.

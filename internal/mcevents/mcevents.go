@@ -34,11 +34,19 @@ const (
 	Left
 	Died
 	Advancement
+
+	// ServerReady and ServerStopping are the lifecycle. The status board needs
+	// them because "is it up" cannot be answered by RCON: a server that is
+	// starting refuses the connection exactly like one that is down, and the
+	// two are very different things to tell a player.
+	ServerReady
+	ServerStopping
 )
 
 var kindNames = map[Kind]string{
 	Authenticated: "authenticated", Joined: "joined", Left: "left",
 	Died: "died", Advancement: "advancement",
+	ServerReady: "server ready", ServerStopping: "server stopping",
 }
 
 func (k Kind) String() string {
@@ -76,6 +84,13 @@ var patterns = []struct {
 		`^\[[^\]]+\] \[[^\]]+\]: (\S+) left the game$`)},
 	{Advancement, regexp.MustCompile(
 		`^\[[^\]]+\] \[[^\]]+\]: (\S+) has made the advancement \[(.+)\]$`)},
+	// Verified on the live server, 2026-08-25. The startup line carries the
+	// boot time, which is worth keeping: a server that takes four minutes to
+	// come up is telling you something.
+	{ServerReady, regexp.MustCompile(
+		`^\[[^\]]+\] \[[^\]]+\]: Done \(([^)]+)\)! For help, type`)},
+	{ServerStopping, regexp.MustCompile(
+		`^\[[^\]]+\] \[[^\]]+\]: (Stopping) the server$`)},
 }
 
 // Parse turns one log line into an event. The second return is false for the
@@ -93,10 +108,18 @@ func Parse(line string) (Event, bool) {
 			e.UUID = strings.ToLower(m[2])
 		case Advancement:
 			e.Detail = m[2]
+		case ServerReady, ServerStopping:
+			// Neither is about a player, and leaving the boot time in Player
+			// would put "12.345s" where a name goes on any surface that did
+			// not special-case it.
+			e.Player, e.Detail = "", m[1]
 		}
 		return e, true
 	}
-	return Event{}, false
+	// Deaths last, and separately, because they are the only lines with no
+	// marker at all: the table they match against is a vocabulary rather than a
+	// pattern. See death.go.
+	return parseDeath(line)
 }
 
 // Statistics is the slice of a player's stats file that anything here surfaces.

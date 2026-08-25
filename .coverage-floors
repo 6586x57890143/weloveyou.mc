@@ -31,6 +31,20 @@ weloveyou-mc/internal/buildinfo   85
 # failure waiting for the next commit.
 weloveyou-mc/internal/discord     95
 
+# The RCON client and the log tailer, both landed with the log bridge.
+#
+# rcon decides what the status board believes about the server and it parses
+# replies off a socket, so a misparse is a wrong number in front of players. It
+# sits at 79 and the floor is set below that deliberately: the uncovered part is
+# the multi-packet reassembly, exercised against a scripted listener rather than
+# a real Minecraft, and it will grow when lifecycle commands land.
+#
+# logtail is the one component that must run for weeks unattended. Rotation is
+# the case that matters and it can only be staged on Linux, where CI runs, so
+# the local number is a point lower than the CI one.
+weloveyou-mc/internal/rcon        70
+weloveyou-mc/internal/logtail     80
+
 # The log parser and the stats reader. The plan's own target was 95 and it is
 # the right number: a misparse here either fails to verify a real player or
 # verifies the wrong one, and the stats feed every leaderboard and playtime

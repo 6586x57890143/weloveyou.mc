@@ -13,7 +13,7 @@ func TestRun(t *testing.T) {
 		wantErr string
 	}{
 		{name: "version prints the stamp", args: []string{"version"}, wantOut: "wly "},
-		{name: "no args is not yet implemented", args: nil, wantErr: "not implemented"},
+		{name: "no args names the commands", args: nil, wantErr: "no command given"},
 		{name: "unknown command is rejected", args: []string{"nope"}, wantErr: `unknown command "nope"`},
 	}
 	for _, tt := range tests {

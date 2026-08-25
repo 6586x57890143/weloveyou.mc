@@ -60,11 +60,16 @@ func TestGetStartedMatchesItsDesign(t *testing.T) {
 
 func TestStatusMatchesItsDesign(t *testing.T) {
 	goldenEquals(t, "status", Status(StatusData{
-		Up:          true,
-		Since:       time.Unix(1787580000, 0),
-		Online:      []string{"kon", "ellis", "m"},
-		MapURL:      "http://100.103.121.9:8123/",
-		WorldDay:    412,
+		Up:       true,
+		Since:    time.Unix(1787580000, 0),
+		Online:   []string{"kon", "ellis", "m"},
+		MapURL:   "http://100.103.121.9:8123/",
+		WorldDay: 412,
+		// HasTick is what the golden was drawn with: a server where something
+		// can actually answer for tick health. Nothing on production can today,
+		// so the other branch is the one that runs, and it is covered below.
+		HasTick:     true,
+		TickFrom:    "spark",
 		TPS:         19.98,
 		MSPTp95:     8.4,
 		PackVersion: "v0.1.7",
@@ -189,8 +194,26 @@ func TestStatusWhenNobodyIsOnAndWhenItIsDown(t *testing.T) {
 	if got := *down.Components[0].AccentColor; got != AccentLose {
 		t.Errorf("a down server read as #%06X", got)
 	}
-	if got := down.Components[0].Components[0].Content; !strings.Contains(got, "down since") {
+	if got := down.Components[0].Components[0].Content; !strings.Contains(got, "down") {
 		t.Errorf("a down server still claimed to be up: %q", got)
+	}
+	// A zero time is "we do not know", not the year 1. The first live post of
+	// this board said "up 2026 years ago", because the daemon started after the
+	// server and had no source for uptime.
+	for _, p := range []Payload{down, Status(StatusData{Up: true})} {
+		if got := p.Components[0].Components[0].Content; strings.Contains(got, "<t:-") ||
+			strings.Contains(got, "<t:0:") {
+			t.Errorf("rendered a zero timestamp: %q", got)
+		}
+	}
+	known := Status(StatusData{Up: false, Since: time.Unix(1787580000, 0)})
+	if got := known.Components[0].Components[0].Content; !strings.Contains(got, "down since") {
+		t.Errorf("a known downtime lost its timestamp: %q", got)
+	}
+	// An empty pack version rendered as "****", which collapses into a stray
+	// glyph and reads as corruption rather than as a missing value.
+	if got := down.Components[0].Components[4].Content; strings.Contains(got, "****") {
+		t.Errorf("empty bold markers reached the board: %q", got)
 	}
 }
 
@@ -246,4 +269,25 @@ func TestEveryCustomIDIsDeclared(t *testing.T) {
 		}
 	}
 	walk(GetStarted(GetStartedData{}).Components)
+}
+
+// Nothing on this server can answer for tick health: spark is pinned in the
+// bench harness and is not in pack/stable, and `spark tps` over RCON on the live
+// server answers "Unknown or incomplete command". The board must therefore not
+// print a TPS figure, because a confident 20.0 that nothing measured is exactly
+// the failure this project keeps writing rules about.
+func TestStatusWillNotInventTickHealth(t *testing.T) {
+	world := Status(StatusData{
+		Up: true, WorldDay: 412, Latency: 37 * time.Millisecond,
+	}).Components[0].Components[3].Content
+
+	if strings.Contains(world, "TPS") || strings.Contains(world, "p95") {
+		t.Errorf("the board claimed tick health with no source: %q", world)
+	}
+	if !strings.Contains(world, "**37ms** server response") {
+		t.Errorf("the board dropped the one number it can measure: %q", world)
+	}
+	if !strings.Contains(world, "day **412**") {
+		t.Errorf("the world day went missing: %q", world)
+	}
 }
