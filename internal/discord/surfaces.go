@@ -69,15 +69,20 @@ type StatusData struct {
 	MCVersion   string
 	NextBackup  time.Time
 
+	// Strip is the heart divider, which is also what makes every card the same
+	// width. See divider().
+	Strip string
+
 	// TPS and MSPTp95 are only real when HasTick is true, which means something
-	// on the server can actually answer for tick health.
+	// on the server actually answered for tick health.
 	//
-	// NOTHING ON THIS SERVER CAN, TODAY. The board was designed around spark,
-	// and spark is pinned in the bench harness and is NOT in pack/stable:
-	// `spark tps` over RCON on the live server answers "Unknown or incomplete
-	// command". Fabric has no vanilla equivalent. So the fields stay, because
-	// the moment spark ships to pack/stable they are correct, and HasTick is
-	// what stops the board printing a confident 20.0 that nothing measured.
+	// spark ships in pack/stable from v0.1.8 and these are live. They were NOT
+	// for the first weeks of this board: `spark tps` answered "Unknown or
+	// incomplete command", Fabric has no vanilla equivalent, and rather than
+	// print a confident 20.0 that nothing measured the board showed the RCON
+	// round trip instead. HasTick is what made that possible and it stays, both
+	// because spark can be removed again and because the numbers go stale the
+	// moment the bridge stops reading the log.
 	TPS      float64
 	MSPTp95  float64
 	HasTick  bool
@@ -139,17 +144,50 @@ func Status(d StatusData) Payload {
 
 	return Container(accent,
 		head,
-		Separator(true, 1),
+		divider(d.Strip),
 		Section(LinkButton("open the map", d.MapURL), Text("### online\n%s", who)),
 		Text("%s", world),
 		// An unknown pack version renders as "**** · minecraft 1.21.1", where the
 		// empty bold collapses into a stray glyph. Say unknown instead: the
 		// first live post of this board showed the glyph and it read as
 		// corruption rather than as a missing value.
-		Text("### the pack\n%s · minecraft %s", boldOrUnknown(d.PackVersion), d.MCVersion),
+		Text("### the pack\n%s · minecraft %s", boldOrUnknown(VersionLabel(d.PackVersion)), d.MCVersion),
 		Separator(false, 2),
 		Text("-# next backup %s. numbers refresh every minute.", Rel(d.NextBackup)),
 	)
+}
+
+// divider is the rule between blocks.
+//
+// With a strip configured it IS the heart strip, which does two jobs at once: it
+// draws the rule, and because a Media Gallery image is the only Components V2
+// element with an intrinsic width, it makes every card carrying it the same
+// width. A Container otherwise takes the width of its widest child, so cards
+// sharing no image render ragged next to each other.
+//
+// Without one it falls back to a plain Separator, so a checkout with no strip
+// published still renders correctly rather than losing its dividers.
+func divider(strip string) Component {
+	if strip == "" {
+		return Separator(true, 1)
+	}
+	return Gallery(strip, "")
+}
+
+// VersionLabel is how a pack version is written wherever a player sees it.
+//
+// pack.toml carries a bare "0.1.8" while the tag, the docs and every human say
+// "v0.1.8", and the design payloads were drawn with the v. Normalising in one
+// place stops two surfaces disagreeing about the same release.
+//
+// Exported because the release check matches on the same string. Search for one
+// form and print the other, and the bot reannounces the same version every ten
+// minutes for ever.
+func VersionLabel(v string) string {
+	if v == "" || strings.HasPrefix(v, "v") {
+		return v
+	}
+	return "v" + v
 }
 
 // boldOrUnknown bolds a value, or says unknown when there is none. Empty bold
@@ -177,6 +215,7 @@ type SpendData struct {
 	CreditsExpire  time.Time
 	AverageDaily   float64
 	ReportedMissed bool // no report at all, or the file could not be read
+	Strip          string
 }
 
 // Spend is the sixth surface, which the master plan omitted and CLAUDE.md
@@ -202,7 +241,7 @@ func Spend(d SpendData) Payload {
 
 	return Container(accent,
 		Text("# spend <:coin:>\n-# for %s", Date(d.Day)),
-		Separator(true, 1),
+		divider(d.Strip),
 		Text("%s", body),
 		Separator(false, 2),
 		Text("-# credits expire %s. a null amount is reported as unknown, never as zero.",
@@ -245,23 +284,40 @@ type ReleaseData struct {
 	Updated     []string
 	Removed     []string
 	PackPageURL string
+	Strip       string
 }
 
 // Release is posted fresh each time rather than edited in place: a release is an
 // event, and editing the previous one would erase that it happened.
+//
+// The notes block is OMITTED ENTIRELY when nothing was written for it, rather
+// than rendered as three headings saying "nothing". A pack published without
+// notes is the ordinary case for an automated post, and "removed: nothing" is a
+// claim that somebody checked. Nobody did.
 func Release(d ReleaseData) Payload {
-	return Container(AccentBase,
-		Text("# pack %s <:heart:>\n-# minecraft %s · %d mods", d.Version, d.MCVersion, d.ModCount),
-		Separator(true, 1),
-		Text("%s", strings.Join([]string{
-			block("added", d.Added),
-			block("updated", d.Updated),
-			block("removed", d.Removed),
-		}, "\n\n")),
-		Separator(true, 1),
-		Section(LinkButton("pack page", d.PackPageURL),
-			Text("### what you need to do\nnothing. it lands on your next launch.")),
-	)
+	parts := []Component{
+		Text("# pack %s <:heart:>\n-# minecraft %s · %d mods",
+			VersionLabel(d.Version), d.MCVersion, d.ModCount),
+		divider(d.Strip),
+	}
+	if notes := releaseNotes(d); notes != "" {
+		parts = append(parts, Text("%s", notes), divider(d.Strip))
+	}
+	parts = append(parts, Section(LinkButton("pack page", d.PackPageURL),
+		Text("### what you need to do\nnothing. it lands on your next launch.")))
+	return Container(AccentBase, parts...)
+}
+
+// releaseNotes renders the three headings, or "" when there is nothing to say.
+func releaseNotes(d ReleaseData) string {
+	if len(d.Added) == 0 && len(d.Updated) == 0 && len(d.Removed) == 0 {
+		return ""
+	}
+	return strings.Join([]string{
+		block("added", d.Added),
+		block("updated", d.Updated),
+		block("removed", d.Removed),
+	}, "\n\n")
 }
 
 // block renders one heading of the release notes. An empty list says "nothing"

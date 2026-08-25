@@ -291,3 +291,92 @@ func TestStatusWillNotInventTickHealth(t *testing.T) {
 		t.Errorf("the world day went missing: %q", world)
 	}
 }
+
+// The strip is the width standard as well as the divider: a Container takes the
+// width of its widest child, and a Media Gallery image is the only element with
+// an intrinsic width. Without it the cards render ragged next to each other.
+func TestStripReplacesTheDividerEverywhere(t *testing.T) {
+	const strip = "https://example.invalid/feed-strip.png"
+	for name, p := range map[string]Payload{
+		"status":  Status(StatusData{Up: true, Strip: strip}),
+		"spend":   Spend(SpendData{Strip: strip}),
+		"release": Release(ReleaseData{Version: "0.1.8", Strip: strip}),
+	} {
+		var galleries, dividers int
+		for _, c := range p.Components[0].Components {
+			switch c.Type {
+			case typeMediaGallery:
+				galleries++
+				if c.Items[0].Media.URL != strip {
+					t.Errorf("%s: gallery points at %q", name, c.Items[0].Media.URL)
+				}
+			case typeSeparator:
+				if c.Divider != nil && *c.Divider {
+					dividers++
+				}
+			}
+		}
+		if galleries == 0 {
+			t.Errorf("%s: the strip never appears, so its card is not width-standardised", name)
+		}
+		if dividers != 0 {
+			t.Errorf("%s: %d plain dividers survived alongside the strip", name, dividers)
+		}
+	}
+}
+
+// Without a strip published the surfaces must still render their rules, or a
+// checkout with nothing configured loses every division on the card.
+func TestNoStripStillDraws(t *testing.T) {
+	p := Status(StatusData{Up: true})
+	var dividers int
+	for _, c := range p.Components[0].Components {
+		if c.Type == typeSeparator && c.Divider != nil && *c.Divider {
+			dividers++
+		}
+	}
+	if dividers == 0 {
+		t.Error("no strip and no divider either; the card lost its rule")
+	}
+}
+
+// "down" alone gives a player no way to tell a blip from an outage they should
+// stop waiting on.
+func TestDownSaysSinceWhen(t *testing.T) {
+	at := time.Unix(1787580000, 0)
+	got := Status(StatusData{Up: false, Since: at}).Components[0].Components[0].Content
+	if !strings.Contains(got, "down since") || !strings.Contains(got, Rel(at)) {
+		t.Errorf("a down board did not say since when: %q", got)
+	}
+}
+
+func TestVersionLabel(t *testing.T) {
+	for in, want := range map[string]string{
+		"0.1.8": "v0.1.8", "v0.1.8": "v0.1.8", "": "",
+	} {
+		if got := VersionLabel(in); got != want {
+			t.Errorf("VersionLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// An automated release has no human-written notes, and three headings saying
+// "nothing" is a claim that somebody checked. Nobody did.
+func TestReleaseOmitsEmptyNotes(t *testing.T) {
+	bare := Release(ReleaseData{Version: "0.1.8"})
+	for _, c := range bare.Components[0].Components {
+		if c.Type == typeTextDisplay && strings.Contains(c.Content, "**removed**") {
+			t.Errorf("invented release notes: %q", c.Content)
+		}
+	}
+	withNotes := Release(ReleaseData{Version: "0.1.8", Added: []string{"minimotd"}})
+	var found bool
+	for _, c := range withNotes.Components[0].Components {
+		if c.Type == typeTextDisplay && strings.Contains(c.Content, "**added**") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("real notes were dropped")
+	}
+}

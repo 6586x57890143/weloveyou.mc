@@ -98,10 +98,14 @@ func Position(c *Conn, player string) (x, z int, ok bool) {
 
 // ServerThreadLatency measures how long the server takes to answer.
 //
-// This exists because THERE IS NO TPS SOURCE ON THIS SERVER. spark is pinned in
-// the bench harness and is not in pack/stable, and Fabric has no vanilla tick
-// command, so the numbers the status board was designed around have nothing
-// behind them. Rather than invent them, wly measures what it can actually see.
+// This exists because for weeks there was NO TPS SOURCE ON THIS SERVER at all:
+// spark was pinned in the bench harness and absent from pack/stable, and Fabric
+// has no vanilla tick command. Rather than invent the numbers the board was
+// designed around, wly measured what it could actually see.
+//
+// spark ships from pack v0.1.8 and the board prefers its figures now. This stays
+// because it is the fallback whenever they are missing or stale, and because it
+// measures something spark does not: whether the server answers AT ALL.
 //
 // It is a real signal and not a substitute dressed up as one: RCON commands are
 // executed ON THE SERVER THREAD, so a server that cannot keep up cannot answer
