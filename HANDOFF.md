@@ -91,7 +91,12 @@ this way:
 - Oritech hard-depends on athena, which Modrinth marks client-only → server died
 - Terralith depends on lithostitched, which we shipped server-only → client died
 - C2ME wants java >=25; Prism gives clients 21 → client died
-- Spark's async-profiler segfaults the JVM on Java 25/aarch64 → ten restart loops
+- Spark's async-profiler segfaults the JVM on Java 25 → ten restart loops.
+  **Java 25 is the variable, NOT the architecture.** This was first blamed on
+  aarch64 because that is where it was met, and the pack's smoke boot then hit
+  the identical `libasyncProfiler.so` SIGSEGV on a linux-amd64 GitHub runner on
+  2026-08-25. Anyone reading the old line and assuming an x86 box was safe would
+  have been wrong. Fixed everywhere with `-Dspark.backgroundProfiler=false`
 
 Three gates now catch these, all in the pack repo's CI:
 

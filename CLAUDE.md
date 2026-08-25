@@ -424,7 +424,7 @@ of the few places the split costs something.
 - **Nothing on the server could answer for TPS until spark shipped**, and the
   board showed measured RCON response time rather than invent one.
   `StatusData.HasTick` is the switch. spark MUST run with
-  `-Dspark.backgroundProfiler=false` on Java 25 / aarch64, in compose and in
+  `-Dspark.backgroundProfiler=false` on Java 25, in compose and in
   `internal/bench/runner.go` alike, or its bundled async-profiler segfaults the
   JVM at boot.
 - **A surface never invents a number.** Every field on a `*Data` struct comes

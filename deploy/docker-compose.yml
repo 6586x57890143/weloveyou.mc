@@ -45,7 +45,7 @@ services:
       # -Dspark.backgroundProfiler=false IS NOT OPTIONAL now that spark ships in
       # pack/stable. spark starts a BACKGROUND async-profiler on servers by
       # default, and its bundled async-profiler is 2.9 from 2022, which
-      # segfaults the JVM on Java 25 / aarch64 at boot. That cost ten restart
+      # segfaults the JVM on Java 25 at boot, on any architecture. That cost ten restart
       # loops on this box once already, and internal/bench/runner.go carries the
       # same flag for the same reason: the bench harness and the live server
       # must not run spark differently, or the numbers measure a server nobody

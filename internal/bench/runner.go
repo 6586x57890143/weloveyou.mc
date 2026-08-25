@@ -46,7 +46,7 @@ const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/RVFHfo1D/Chun
 //
 // 1.10.109 (2024-09-26) is the newest build declaring 1.21.1, spark moved on to
 // >=26.1 and is not coming back. jvm-profiles.toml recorded spark as unusable
-// because its bundled async-profiler segfaulted the JVM on Java 25/aarch64 in
+// because its bundled async-profiler segfaulted the JVM on Java 25 in
 // restart loops. That was true and the cause was findable: spark runs a
 // BACKGROUND profiler on servers by default, which engages async-profiler at
 // boot. Disabling it (see SparkOpts) leaves `/spark tps` working, because tick
@@ -58,7 +58,16 @@ const ChunkyURL = "https://cdn.modrinth.com/data/fALzjamp/versions/RVFHfo1D/Chun
 // 2.9 did. Swapping just that file is a possible follow-up, not a need.
 const SparkURL = "https://cdn.modrinth.com/data/l6YH9Als/versions/cALUj9l1/spark-1.10.109-fabric.jar"
 
-// SparkOpts keeps spark from starting async-profiler at boot. Without this the
+// SparkOpts keeps spark from starting async-profiler at boot.
+//
+// NOT architecture specific, whatever this was first blamed on. It was met on
+// the aarch64 production box, so the note said "Java 25/aarch64" for weeks; the
+// pack's smoke boot then hit the identical libasyncProfiler.so SIGSEGV on a
+// linux-amd64 runner on 2026-08-25. Java 25 is the variable.
+//
+// The same flag is in deploy/docker-compose.yml and in weloveyou-pack's
+// smoke-boot.sh, so the harness, the live server and the gate all boot spark
+// identically. Without this the
 // JVM dies with SIGSEGV in VMThread::nativeThreadId on Java 25/aarch64.
 var SparkOpts = []string{"-Dspark.backgroundProfiler=false"}
 
