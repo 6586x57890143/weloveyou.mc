@@ -95,7 +95,7 @@ func TestRefreshSpendTreatsAMissingReportAsTheAlert(t *testing.T) {
 	d.refreshSpend(context.Background())
 
 	body := strings.Join(rec.Bodies(), "")
-	if !strings.Contains(body, "no cost report") {
+	if !strings.Contains(body, "no spend report") {
 		t.Errorf("a missing report did not raise the alert: %s", body)
 	}
 	if !strings.Contains(body, "12873820") { // AccentLose
@@ -109,7 +109,7 @@ func TestRefreshSpendTreatsGarbageAsTheAlert(t *testing.T) {
 	d.cfg.Cost.ReportPath = writeCost(t, `{not json at all`)
 
 	d.refreshSpend(context.Background())
-	if !strings.Contains(strings.Join(rec.Bodies(), ""), "no cost report") {
+	if !strings.Contains(strings.Join(rec.Bodies(), ""), "no spend report") {
 		t.Error("unparseable JSON was not treated as a missing report")
 	}
 }

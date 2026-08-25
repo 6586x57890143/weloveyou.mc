@@ -1,10 +1,10 @@
 {
   "_meta": {
-    "surface": "getstarted",
     "direction": "b",
-    "title": "Card",
+    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. A regular player types nothing at all: step 3 has no button because nothing handles interactions, and it needs none. Mojang authenticates a join attempt before the whitelist is consulted, so the attempt itself is the proof and wly reads it off the log.",
     "status": "chosen 2026-08-24",
-    "note": "Section per step, each with its own accessory, plus the Prism import screenshot. A regular player types nothing at all: step 3 has no button because nothing handles interactions, and it needs none. Mojang authenticates a join attempt before the whitelist is consulted, so the attempt itself is the proof and wly reads it off the log."
+    "surface": "getstarted",
+    "title": "Card"
   },
   "flags": 32768,
   "components": [
@@ -73,7 +73,7 @@
         },
         {
           "type": 10,
-          "content": "-# **worth knowing:** importing this instance lets prism run a small updater before every launch. that is what keeps your mods in sync, so a pack update never asks anything of you. the updater ships inside the zip and we check it on the way in, nothing gets downloaded fresh at launch. if you would rather skip all that, grab the .mrpack from the pack page and update by hand."
+          "content": "-# **worth knowing:** prism runs a small updater before each launch, which is what keeps your mods in sync. it ships inside the zip and we check it on the way in. if you would rather not, take the .mrpack from the pack page and update by hand."
         }
       ]
     }

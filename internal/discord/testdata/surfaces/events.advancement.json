@@ -1,8 +1,8 @@
 {
   "_meta": {
+    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it.",
     "surface": "events.advancement",
-    "title": "Event feed, advancement",
-    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it."
+    "title": "Event feed, advancement"
   },
   "flags": 32768,
   "components": [

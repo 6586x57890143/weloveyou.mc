@@ -1,8 +1,8 @@
 {
   "_meta": {
+    "note": "Fires on a new version. The changelog comes from packwiz.Diff. The line that matters is the last one: normally you do nothing.",
     "surface": "release",
-    "title": "Pack release",
-    "note": "Fires on a new version. The changelog comes from packwiz.Diff. The line that matters is the last one: normally you do nothing."
+    "title": "Pack release"
   },
   "flags": 32768,
   "components": [
