@@ -229,6 +229,37 @@ mapping, which was true from the box and irrelevant from the internet.
 
 ### Traps that cost real time
 
+**Discord silently mangles channel names, and answers 200 while doing it.** The
+emoji-prefix convention (`💬│general`) needs a separator, and picking one is
+measurement, not taste. Discord rewrites every character Unicode calls
+whitespace into a hyphen, and strips every zero-width one, returning success
+either way. Applied one candidate per channel on the live guild and read them
+back: U+00A0 became a hyphen; U+2800, U+3164 and U+2063 were stripped; U+2502
+`│` survived. U+17B5 is the one that looks like a win and is not, it survives
+storage but measures **0px wide** in Discord's own font, so the file matches, the
+reconciler goes quiet, and the name renders exactly as if there were no
+separator. A stripped separator is worse than none: the file can then never
+match what Discord stored, so the plan reports the same rename forever and stops
+meaning anything.
+
+**Renaming a channel is rate limited to two changes per ten minutes, per
+channel**, and `retry_after` comes back in the 180-450 second range rather than
+the seconds an API rate limit usually means. A rename sweep across eight
+channels does not finish in one `--apply`, which is normal rather than a
+failure. Apply says which cause it hit and carries on to the channels it can
+still touch, because a fixed block of "check your permissions" printed under a
+rate-limit error is the confidently-wrong output this repo exists to avoid.
+
+**A private channel locks the bot out of itself.** `visible_to` denies
+`@everyone` VIEW\_CHANNEL, which denies it to `wly` too, and `wly` is the only
+thing that ever writes the pinned surface in there. Worse, it cannot fix itself:
+granting the access requires editing a channel it cannot see, so the request
+that would repair it is the one being refused. Recovering needs a human in
+Server Settings. `Channel.Overwrites` now emits the bot's own view+send grant in
+the same payload as the deny, so the two land atomically and no channel can be
+created into that state again. That applies to temporary event channels exactly
+as much as to `#ops`.
+
 **A compose profile does not gate interpolation.** Adding a `db` service with
 `POSTGRES_PASSWORD: "${DB_PASSWORD:?...}"` broke `docker compose up -d` on every
 box that had not set it, including one that only runs Minecraft. Putting the

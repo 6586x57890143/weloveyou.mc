@@ -393,9 +393,9 @@ func roleBody(r discord.Role, gradients bool) map[string]any {
 // The merge is the point. Discord's PATCH replaces the entire overwrite set, so
 // sending only the declared ones would strip a moderator role's access, or one
 // person's, as a side effect of correcting a topic. Apply never deletes.
-func overwriteBody(ch discord.Channel, cur discord.LiveChannel, roleID map[string]string) ([]map[string]any, error) {
+func overwriteBody(ch discord.Channel, cur discord.LiveChannel, roleID map[string]string, botRole string) ([]map[string]any, error) {
 	out := []map[string]any{}
-	for _, o := range discord.MergeOverwrites(ch.Overwrites(), cur.Overwrites) {
+	for _, o := range discord.MergeOverwrites(ch.Overwrites(botRole), cur.Overwrites) {
 		id := o.ID
 		if id == "" {
 			var ok bool
@@ -427,12 +427,14 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 	for _, r := range live.Roles {
 		roleID[r.Name] = r.ID
 	}
-	chanID := map[string]string{}
 	catID := map[string]string{}
+	// Resolved the way the planner resolved it, by id first, so apply and plan
+	// can never disagree about which channel a declared one means.
 	liveChan := map[string]discord.LiveChannel{}
-	for _, ch := range live.Channels {
-		chanID[ch.Name] = ch.ID
-		liveChan[ch.Name] = ch
+	for _, ch := range g.Channels {
+		if cur, ok := discord.MatchChannel(ch, live); ok {
+			liveChan[ch.Name] = cur
+		}
 	}
 
 	todo := map[discord.Kind]map[string]bool{}
@@ -528,7 +530,7 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 
 	// 4. channels
 	for _, ch := range g.Channels {
-		overwrites, err := overwriteBody(ch, liveChan[ch.Name], roleID)
+		overwrites, err := overwriteBody(ch, liveChan[ch.Name], roleID, live.BotHighestRole)
 		if err != nil {
 			return err
 		}
@@ -545,21 +547,46 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 			if err := c.do("POST", "/guilds/"+g.Meta.ID+"/channels", body, &created); err != nil {
 				return fmt.Errorf("create channel %s: %w", ch.Name, err)
 			}
-			chanID[ch.Name] = created.ID
-			fmt.Fprintf(out, "  created channel %s\n", ch.Name)
+			fmt.Fprintf(out, "  created channel %s, id %s. Put that in guild.toml: until it is there, a rename cannot be told from a new channel.\n",
+				ch.Name, created.ID)
 			continue
 		}
 
 		if todo[discord.UpdateChannel][ch.Name] {
-			body := map[string]any{"topic": ch.Topic}
+			// name is sent because a rename is a real diff now that channels
+			// are matched by id. Without it, renaming one in guild.toml would
+			// plan a change that apply then quietly did not make.
+			body := map[string]any{"name": ch.Name, "topic": ch.Topic}
 			if id := catID[ch.Category]; id != "" {
 				body["parent_id"] = id
 			}
 			if len(overwrites) > 0 {
 				body["permission_overwrites"] = overwrites
 			}
-			if err := c.do("PATCH", "/channels/"+chanID[ch.Name], body, nil); err != nil {
-				return fmt.Errorf("update channel %s: %w", ch.Name, err)
+			if err := c.do("PATCH", "/channels/"+liveChan[ch.Name].ID, body, nil); err != nil {
+				// Not fatal, for the same reason a refused reorder is not: one
+				// channel wly cannot reach must not stop the seven it can. The
+				// advice is chosen from the error, because a fixed block of it
+				// under the wrong failure is worse than none.
+				fmt.Fprintf(out, "  ! could not update %s: %v\n", ch.Name, err)
+				switch {
+				case strings.Contains(err.Error(), "50001"):
+					// wly is locked out and cannot grant itself access to a channel
+					// it cannot already see: the request that would fix it is the
+					// one being refused. Channels created from here on carry the
+					// grant from birth, so this only means one that predates it.
+					fmt.Fprintf(out, "    Open that channel's Permissions, add the %q\n"+
+						"    role and allow View Channel, then re-run.\n", live.BotHighestRole)
+				case strings.Contains(err.Error(), "rate limited"):
+					// Measured on the live guild: renaming a channel is limited to
+					// TWO changes per ten minutes PER CHANNEL, and the wait is
+					// minutes rather than seconds. Nothing is broken and nothing
+					// needs fixing; the plan is simply not finished yet.
+					fmt.Fprint(out, "    Renaming a channel is limited to two changes per\n"+
+						"    ten minutes, per channel. Nothing is wrong: wait out the\n"+
+						"    retry_after above and run --apply again.\n")
+				}
+				continue
 			}
 			fmt.Fprintf(out, "  updated channel %s\n", ch.Name)
 		}

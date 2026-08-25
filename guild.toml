@@ -3,7 +3,7 @@
 # the same way jvm-profiles.toml and docker-compose.yml already are.
 #
 # Roles and channels are ARRAYS OF TABLES, not named tables, because order is
-# meaning here and a named table lands in a Go map, which has none. Role order
+# meaning here and a named table lands in a Go│map, which has none. Role order
 # is the hierarchy, highest first. Channel order is display order in its
 # category. The first version of this file said "order here is the hierarchy"
 # while parsing into something that could not preserve it.
@@ -62,7 +62,7 @@ metadata_key = "first_joined"
 [[roles]]
 name = "deathless"
 # Costs nothing, means something, and is lost the moment you die. The cheapest
-# status perk there is.
+#│status perk there is.
 color = "#8FA860"
 granted_by = "linked_role"
 metadata_key = "deaths"
@@ -92,43 +92,91 @@ metadata_key = "has_joined"
 # ---------------------------------------------------------------------------
 # Channels, in display order within each category. `surface` names the pinned
 # message wly owns and edits in place; a channel with one is wly's to write in.
+#
+# `id` is the Discord channel id and it is what makes the name editable. Match
+# on the name alone and renaming one here reads as "create a second channel and
+# abandon the first", which destroys a channel of history without ever issuing a
+# delete. With the id, a rename is an `update channel` line in the plan. A new
+# channel has no id yet; apply prints the one it just created so it can be
+# pasted back in here.
+#
+# Each name is an emoji, a BRAILLE PATTERN BLANK (U+2800), then the name. The
+# emoji is the convention for this server: one per channel, fitting, never
+# decorative.
+#
+# The separator is U+2502 BOX DRAWINGS LIGHT VERTICAL, and it is VISIBLE on
+# purpose, because a blank one is not available. That is a measurement, not a
+# preference:
+#
+#   U+00A0 non-breaking space   -> rewritten to a hyphen
+#   U+2800 braille blank        -> stripped
+#   U+3164 hangul filler        -> stripped
+#   U+2063 invisible separator  -> stripped
+#   U+17B5 khmer inherent aa    -> survives, but measures 0px wide: no gap at all
+#   U+2502 box drawings light   -> SURVIVES and renders, 10px   <- this one
+#
+# Discord rewrites every character Unicode calls whitespace into a hyphen and
+# strips every zero-width one, and it answers 200 while doing either, so a
+# candidate is only believed after it is applied and read back. U+17B5 is the
+# trap in that list: it survives storage, so the reconciler goes quiet and the
+# name looks right in the file while rendering identically to no separator.
+# Measured in Discord's own font, gg sans 16px, against a real space at 3.5px.
+#
+# A separator Discord strips is worse than none. The file can then never match
+# what Discord stored, so the reconciler reports the same rename on every run
+# and the plan stops meaning anything.
+#
+# The bar also matches the identity rather than borrowing Discord's: CLAUDE.md
+# already puts box-drawing glyphs where monospace alignment carries meaning, and
+# the bench site is built out of them.
+#
+# RENAMING IS RATE LIMITED: two changes per ten minutes PER CHANNEL, and the wait
+# is minutes, not seconds. A rename sweep across eight channels does not finish in
+# one apply, and that is normal rather than a failure. Apply says so and carries
+# on to the channels it can still touch.
 # ---------------------------------------------------------------------------
 
 [[channels]]
-name = "start-here"
+id = "1541487310070087781"
+name = "👋│start-here"
 category = "welcome"
 topic = "install the pack, get whitelisted, join"
 surface = "getstarted"
 readonly = true
 
 [[channels]]
-name = "announcements"
+id = "1541487311944945834"
+name = "📣│announcements"
 category = "welcome"
 topic = "pack releases and anything that changes how you play"
 surface = "release"
 readonly = true
 
 [[channels]]
-name = "general"
+id = "1540075306126286930"
+name = "💬│general"
 category = "the server"
 topic = "talk about anything"
 
 [[channels]]
-name = "status"
+id = "1541487314658660532"
+name = "📊│status"
 category = "the server"
 topic = "is it up, who is on, what it costs"
 surface = "status"
 readonly = true
 
 [[channels]]
-name = "map"
+id = "1541487315560435834"
+name = "🗺│map"
 category = "the world"
-topic = "the live map, and the Activity"
+topic = "the live│map, and the Activity"
 surface = "map"
 readonly = true
 
 [[channels]]
-name = "feed"
+id = "1541487317078900786"
+name = "🔔│feed"
 category = "the world"
 topic = "joins, deaths, advancements, as they happen"
 surface = "events"
@@ -136,13 +184,15 @@ readonly = true
 visible_to = ["player"]
 
 [[channels]]
-name = "supporters"
+id = "1541487318161035275"
+name = "💖│supporters"
 category = "the world"
 topic = "thank you, genuinely"
 visible_to = ["supporter"]
 
 [[channels]]
-name = "ops"
+id = "1541487319826047026"
+name = "🔧│ops"
 category = "ops"
 topic = "spend, health, backups. wly talks to itself in here."
 surface = "spend"

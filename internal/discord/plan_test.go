@@ -41,6 +41,8 @@ func liveMatching() Live {
 			{Name: "feed", Category: "the world", Topic: "events", Overwrites: []LiveOverwrite{
 				{ID: "42", Type: OverwriteRole, Role: Everyone, Deny: PermViewChannel},
 				{ID: "p", Type: OverwriteRole, Role: "player", Allow: PermViewChannel},
+				{ID: "b", Type: OverwriteRole, Role: "wly",
+					Allow: PermViewChannel | PermSendMessages},
 			}},
 		},
 		Emojis: []string{"heart", "skull"},
@@ -299,7 +301,7 @@ func TestChannelOverwrites(t *testing.T) {
 			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.ch.Overwrites()
+			got := tc.ch.Overwrites("")
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %+v, want %+v", got, tc.want)
 			}
@@ -315,7 +317,7 @@ func TestChannelOverwrites(t *testing.T) {
 // The bit that matters most: a role allowed to see a readonly channel must not
 // also gain the ability to post in it.
 func TestOverwritesNeverGrantSendBack(t *testing.T) {
-	for _, o := range (Channel{ReadOnly: true, VisibleTo: []string{"player"}}).Overwrites() {
+	for _, o := range (Channel{ReadOnly: true, VisibleTo: []string{"player"}}).Overwrites("") {
 		if o.Allow&PermSendMessages != 0 {
 			t.Fatalf("%s was granted send in a readonly channel", o.Role)
 		}
@@ -329,17 +331,20 @@ func TestRealOpsChannelIsPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Found by surface, not by name. Channel names carry an emoji prefix now
+	// and are meant to be editable; the surface a channel owns is the stable
+	// thing, and "the channel holding spend" is what this test is about.
 	for _, c := range g.Channels {
-		if c.Name != "ops" {
+		if c.Surface != "spend" {
 			continue
 		}
-		ow := c.Overwrites()
+		ow := c.Overwrites("")
 		if len(ow) == 0 || ow[0].Role != Everyone || ow[0].Deny&PermViewChannel == 0 {
-			t.Fatalf("ops is not private: %+v", ow)
+			t.Fatalf("%s is not private: %+v", c.Name, ow)
 		}
 		return
 	}
-	t.Fatal("no ops channel in guild.toml")
+	t.Fatal("no channel in guild.toml owns the spend surface")
 }
 
 // wly never grants a managed role to an application, but any other bot with
@@ -516,7 +521,7 @@ func TestMergeOverwritesPreservesWhatGuildTomlDoesNotDeclare(t *testing.T) {
 		{ID: "mod", Type: OverwriteRole, Role: "moderator", Allow: PermViewChannel},
 		{ID: "kon", Type: 1, Allow: PermViewChannel}, // one person, by hand
 	}
-	want := Channel{Name: "feed", VisibleTo: []string{"player"}}.Overwrites()
+	want := Channel{Name: "feed", VisibleTo: []string{"player"}}.Overwrites("")
 	got := MergeOverwrites(want, live)
 
 	by := map[string]LiveOverwrite{}
@@ -551,5 +556,115 @@ func TestPermNames(t *testing.T) {
 		if got := permNames(bits); got != want {
 			t.Errorf("permNames(%d) = %q, want %q", bits, got, want)
 		}
+	}
+}
+
+// A restriction applies to the bot like it applies to anyone. wly is the only
+// thing that writes the pinned surface in a private channel, so a channel that
+// hides itself from @everyone has to keep wly in. Found the hard way: renaming
+// #feed on the live guild came back 403 Missing Access.
+func TestPrivateChannelKeepsTheBotIn(t *testing.T) {
+	c := Channel{Name: "ops", VisibleTo: []string{"admin"}}
+	var bot *Overwrite
+	for _, o := range c.Overwrites("wly") {
+		if o.Role == "wly" {
+			bot = &o
+		}
+	}
+	if bot == nil {
+		t.Fatal("a private channel locked the bot out of itself")
+	}
+	if bot.Allow&PermViewChannel == 0 || bot.Allow&PermSendMessages == 0 {
+		t.Errorf("bot allow = %d, it needs view and send to maintain a surface", bot.Allow)
+	}
+	// A readonly channel is readonly for people, not for the thing whose
+	// surface it holds.
+	ro := Channel{Name: "status", ReadOnly: true}
+	var found bool
+	for _, o := range ro.Overwrites("wly") {
+		if o.Role == "wly" && o.Allow&PermSendMessages != 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a readonly channel denied the bot the send it needs to post the surface")
+	}
+	// A caller that does not know the bot's role yet gets no phantom overwrite.
+	for _, o := range c.Overwrites("") {
+		if o.Role == "" {
+			t.Errorf("an unknown bot role produced an overwrite for nobody: %v", o)
+		}
+	}
+}
+
+// A rename must read as a rename. On the name alone it reads as "create a
+// second channel and abandon the first", which loses a channel of history
+// without apply ever issuing a delete.
+func TestRenameIsADiffAndNotADuplicate(t *testing.T) {
+	g := base()
+	g.Channels[0] = Channel{ID: "c1", Name: "NEWNAME", Category: "the server", Topic: "talk"}
+	live := liveMatching()
+	live.Channels[0].ID = "c1"
+
+	p, err := Compute(g, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var updates, creates int
+	for _, a := range p.Actions {
+		switch a.Kind {
+		case UpdateChannel:
+			updates++
+			if !strings.Contains(a.Detail, "name") {
+				t.Errorf("update did not mention the name: %s", a.Detail)
+			}
+		case CreateChannel:
+			creates++
+		}
+	}
+	if creates != 0 {
+		t.Errorf("a rename created %d channel(s)", creates)
+	}
+	if updates != 1 {
+		t.Errorf("got %d updates, want the one rename", updates)
+	}
+	// And the old name is NOT drift. Reporting it would be the same mistake
+	// wearing a different hat.
+	for _, d := range p.Drift {
+		if strings.Contains(d.Target, "general") {
+			t.Errorf("the renamed channel was reported as drift: %s", d.Target)
+		}
+	}
+}
+
+func TestMatchChannel(t *testing.T) {
+	live := Live{Channels: []LiveChannel{
+		{ID: "1", Name: "general"},
+		{ID: "2", Name: "feed"},
+	}}
+	// id wins, even when a different channel carries the declared name
+	if got, ok := MatchChannel(Channel{ID: "2", Name: "general"}, live); !ok || got.ID != "2" {
+		t.Errorf("id did not win: %+v %v", got, ok)
+	}
+	// name is the fallback for a channel that has never been created
+	if got, ok := MatchChannel(Channel{Name: "feed"}, live); !ok || got.ID != "2" {
+		t.Errorf("name fallback failed: %+v %v", got, ok)
+	}
+	// a declared id that is not there is a create, NOT "the one with the same
+	// name", which could be an entirely different channel
+	if _, ok := MatchChannel(Channel{ID: "99", Name: "general"}, live); ok {
+		t.Error("a missing id fell back to the name, which can match the wrong channel")
+	}
+}
+
+func TestChannelIDMustBeASnowflake(t *testing.T) {
+	g := base()
+	g.Channels[0].ID = "not-a-snowflake"
+	if err := g.Validate(); err == nil {
+		t.Fatal("accepted an id that cannot be a Discord channel")
+	}
+	g.Channels[0].ID, g.Channels[1].ID = "7", "7"
+	if err := g.Validate(); err == nil {
+		t.Fatal("accepted two channels claiming the same id")
 	}
 }
