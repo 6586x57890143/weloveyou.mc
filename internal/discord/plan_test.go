@@ -35,7 +35,13 @@ func liveMatching() Live {
 		},
 		Channels: []LiveChannel{
 			{Name: "general", Category: "the server", Topic: "talk"},
-			{Name: "feed", Category: "the world", Topic: "events"},
+			// feed is visible_to player, so a matching server carries the two
+			// overwrites that means. Without them here the fixture would be
+			// claiming a private channel is correct while it is world-readable.
+			{Name: "feed", Category: "the world", Topic: "events", Overwrites: []LiveOverwrite{
+				{ID: "42", Type: OverwriteRole, Role: Everyone, Deny: PermViewChannel},
+				{ID: "p", Type: OverwriteRole, Role: "player", Allow: PermViewChannel},
+			}},
 		},
 		Emojis: []string{"heart", "skull"},
 	}
@@ -454,6 +460,96 @@ func TestNoReorderWhenRolesAreMissing(t *testing.T) {
 	for _, a := range p.Actions {
 		if a.Kind == ReorderRoles {
 			t.Fatalf("reordered on a server with no roles yet: %s", a.Detail)
+		}
+	}
+}
+
+// The gap this closes: topic and category matched, so a channel whose privacy
+// had been changed by hand read as correct. #feed is the private half of the
+// server and #ops carries spend.
+func TestComputeSeesPermissionDrift(t *testing.T) {
+	live := liveMatching()
+	for i, c := range live.Channels {
+		if c.Name == "feed" {
+			live.Channels[i].Overwrites = nil // someone cleared them in the client
+		}
+	}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := Render(p)
+	if !strings.Contains(got, "update channel feed") {
+		t.Fatalf("permission drift on a private channel went unreported:\n%s", got)
+	}
+	if !strings.Contains(got, "deny none -> view") {
+		t.Errorf("the diff does not say what changes in words:\n%s", got)
+	}
+}
+
+// Only the bits guild.toml decides are compared. A moderator role with Manage
+// Messages, or an extra bit someone set on @everyone, is not this file's
+// business and must not be reported as drift on every single run.
+func TestPermissionDiffIgnoresUnmanagedBits(t *testing.T) {
+	const manageMessages int64 = 1 << 13
+	live := liveMatching()
+	for i, c := range live.Channels {
+		if c.Name == "feed" {
+			live.Channels[i].Overwrites[0].Deny |= manageMessages
+		}
+	}
+	p, err := Compute(base(), live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !p.Empty() {
+		t.Fatalf("an unmanaged bit was reported as drift:\n%s", Render(p))
+	}
+}
+
+// Discord's PATCH replaces the whole overwrite set, so the merge is the only
+// thing standing between "fix a topic" and "revoke a moderator".
+func TestMergeOverwritesPreservesWhatGuildTomlDoesNotDeclare(t *testing.T) {
+	const manageMessages int64 = 1 << 13
+	live := []LiveOverwrite{
+		{ID: "42", Type: OverwriteRole, Role: Everyone, Deny: manageMessages},
+		{ID: "mod", Type: OverwriteRole, Role: "moderator", Allow: PermViewChannel},
+		{ID: "kon", Type: 1, Allow: PermViewChannel}, // one person, by hand
+	}
+	want := Channel{Name: "feed", VisibleTo: []string{"player"}}.Overwrites()
+	got := MergeOverwrites(want, live)
+
+	by := map[string]LiveOverwrite{}
+	for _, o := range got {
+		by[o.ID] = o
+	}
+	if len(got) != 4 {
+		t.Fatalf("merged set = %v, want the three live ones plus player", got)
+	}
+	if by["mod"].Allow != PermViewChannel {
+		t.Errorf("the moderator role lost its access: %v", by["mod"])
+	}
+	if by["kon"].Type != 1 || by["kon"].Allow != PermViewChannel {
+		t.Errorf("a member overwrite was rewritten as a role one: %v", by["kon"])
+	}
+	// @everyone keeps the unmanaged bit AND gains the declared one.
+	if e := by["42"]; e.Deny != manageMessages|PermViewChannel {
+		t.Errorf("@everyone deny = %d, want the hand-set bit kept and view added", e.Deny)
+	}
+	if by[""].Role != "player" || by[""].Allow != PermViewChannel {
+		t.Errorf("player was not added with an unresolved id: %v", by[""])
+	}
+}
+
+func TestPermNames(t *testing.T) {
+	for bits, want := range map[int64]string{
+		0:                                  "none",
+		PermViewChannel:                    "view",
+		PermSendMessages:                   "send",
+		PermViewChannel | PermSendMessages: "view+send",
+	} {
+		if got := permNames(bits); got != want {
+			t.Errorf("permNames(%d) = %q, want %q", bits, got, want)
 		}
 	}
 }

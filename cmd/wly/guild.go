@@ -98,11 +98,22 @@ type apiRole struct {
 }
 
 type apiChannel struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     int    `json:"type"` // 0 text, 4 category
-	Topic    string `json:"topic"`
-	ParentID string `json:"parent_id"`
+	ID         string         `json:"id"`
+	Name       string         `json:"name"`
+	Type       int            `json:"type"` // 0 text, 4 category
+	Topic      string         `json:"topic"`
+	ParentID   string         `json:"parent_id"`
+	Overwrites []apiOverwrite `json:"permission_overwrites"`
+}
+
+// apiOverwrite is one permission overwrite. Allow and Deny are strings because
+// Discord sends permission bitfields that way: they exceed what a JSON number
+// is guaranteed to carry, so decoding them as numbers loses the high bits.
+type apiOverwrite struct {
+	ID    string `json:"id"`
+	Type  int    `json:"type"`
+	Allow string `json:"allow"`
+	Deny  string `json:"deny"`
 }
 
 type apiEmoji struct {
@@ -136,8 +147,10 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 	// higher. internal/discord expects highest first, because that is how the
 	// hierarchy reads in the client and in guild.toml.
 	byID := map[string]apiRole{}
+	roleName := map[string]string{}
 	for _, r := range roles {
 		byID[r.ID] = r
+		roleName[r.ID] = r.Name
 	}
 	sortRolesHighestFirst(roles)
 	for _, r := range roles {
@@ -161,9 +174,19 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 		if ch.Type == 4 {
 			continue // categories are structure, not channels
 		}
-		live.Channels = append(live.Channels, discord.LiveChannel{
+		lc := discord.LiveChannel{
 			ID: ch.ID, Name: ch.Name, Topic: ch.Topic, Category: catName[ch.ParentID],
-		})
+		}
+		for _, o := range ch.Overwrites {
+			// A bitfield Discord cannot parse is not a reason to refuse the
+			// whole reconcile; it reads as no bits, which the diff then reports.
+			allow, _ := strconv.ParseInt(o.Allow, 10, 64)
+			deny, _ := strconv.ParseInt(o.Deny, 10, 64)
+			lc.Overwrites = append(lc.Overwrites, discord.LiveOverwrite{
+				ID: o.ID, Type: o.Type, Role: roleName[o.ID], Allow: allow, Deny: deny,
+			})
+		}
+		live.Channels = append(live.Channels, lc)
 	}
 
 	var emojis []apiEmoji
@@ -201,10 +224,6 @@ func (c *discordClient) fetchLive(guildID string) (discord.Live, error) {
 	if err := c.do("GET", "/guilds/"+guildID+"/members?limit=1000", nil, &members); err != nil {
 		live.MembersUnavailable = err.Error()
 	} else {
-		roleName := map[string]string{}
-		for _, r := range roles {
-			roleName[r.ID] = r.Name
-		}
 		for _, m := range members {
 			lm := discord.LiveMember{ID: m.User.ID, Name: m.User.Username, Bot: m.User.Bot}
 			for _, id := range m.Roles {
@@ -343,6 +362,56 @@ func fromEnvFile(path, key string) string {
 	return ""
 }
 
+// roleBody is the JSON for one role, shared by create and update so the two
+// cannot describe the same role differently.
+//
+// Permissions are deliberately not sent. The only role in guild.toml declaring
+// any is `admin`, which is `manual`, and a committed config file is the wrong
+// authority on who is an administrator.
+func roleBody(r discord.Role, gradients bool) map[string]any {
+	colour, _ := discord.ParseColor(r.Color)
+	body := map[string]any{"name": r.Name, "color": colour,
+		"hoist": r.Hoist, "mentionable": r.Mentionable}
+	if r.Colors != nil && gradients {
+		cols := map[string]any{}
+		for k, v := range map[string]string{"primary_color": r.Colors.Primary,
+			"secondary_color": r.Colors.Secondary, "tertiary_color": r.Colors.Tertiary} {
+			if v == "" {
+				continue
+			}
+			n, _ := discord.ParseColor(v)
+			cols[k] = n
+		}
+		body["colors"] = cols
+	}
+	return body
+}
+
+// overwriteBody is what a channel's declared visibility becomes on the wire,
+// merged over whatever the channel already carries.
+//
+// The merge is the point. Discord's PATCH replaces the entire overwrite set, so
+// sending only the declared ones would strip a moderator role's access, or one
+// person's, as a side effect of correcting a topic. Apply never deletes.
+func overwriteBody(ch discord.Channel, cur discord.LiveChannel, roleID map[string]string) ([]map[string]any, error) {
+	out := []map[string]any{}
+	for _, o := range discord.MergeOverwrites(ch.Overwrites(), cur.Overwrites) {
+		id := o.ID
+		if id == "" {
+			var ok bool
+			if id, ok = roleID[o.Role]; !ok {
+				return nil, fmt.Errorf("channel %s names role %q, which has no id", ch.Name, o.Role)
+			}
+		}
+		out = append(out, map[string]any{
+			"id": id, "type": o.Type,
+			"allow": strconv.FormatInt(o.Allow, 10),
+			"deny":  strconv.FormatInt(o.Deny, 10),
+		})
+	}
+	return out, nil
+}
+
 // applyPlan performs the plan. It creates and updates; it never deletes, which
 // is enforced upstream by drift being a separate field on the Plan that this
 // function cannot see.
@@ -360,8 +429,10 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 	}
 	chanID := map[string]string{}
 	catID := map[string]string{}
+	liveChan := map[string]discord.LiveChannel{}
 	for _, ch := range live.Channels {
 		chanID[ch.Name] = ch.ID
+		liveChan[ch.Name] = ch
 	}
 
 	todo := map[discord.Kind]map[string]bool{}
@@ -377,27 +448,34 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 		if !todo[discord.CreateRole][r.Name] {
 			continue
 		}
-		colour, _ := discord.ParseColor(r.Color)
-		body := map[string]any{"name": r.Name, "color": colour,
-			"hoist": r.Hoist, "mentionable": r.Mentionable}
-		if r.Colors != nil && p.GradientsAvailable {
-			cols := map[string]any{}
-			for k, v := range map[string]string{"primary_color": r.Colors.Primary,
-				"secondary_color": r.Colors.Secondary, "tertiary_color": r.Colors.Tertiary} {
-				if v == "" {
-					continue
-				}
-				n, _ := discord.ParseColor(v)
-				cols[k] = n
-			}
-			body["colors"] = cols
-		}
 		var created apiRole
-		if err := c.do("POST", "/guilds/"+g.Meta.ID+"/roles", body, &created); err != nil {
+		if err := c.do("POST", "/guilds/"+g.Meta.ID+"/roles",
+			roleBody(r, p.GradientsAvailable), &created); err != nil {
 			return fmt.Errorf("create role %s: %w", r.Name, err)
 		}
 		roleID[r.Name] = created.ID
 		fmt.Fprintf(out, "  created role %s\n", r.Name)
+	}
+
+	// 1b. roles that exist and differ. This branch used to be missing: Compute
+	// emitted UpdateRole actions and Render printed them, but apply read the
+	// same map and had no case for them, so --apply announced work and did
+	// none. A colour or hoist change to a role that already existed could not be
+	// made by this tool at all, and nothing said so.
+	for _, r := range g.Roles {
+		if !todo[discord.UpdateRole][r.Name] {
+			continue
+		}
+		id, ok := roleID[r.Name]
+		if !ok {
+			return fmt.Errorf("update role %s: it has no id, which cannot happen "+
+				"for a role the plan says already exists", r.Name)
+		}
+		if err := c.do("PATCH", "/guilds/"+g.Meta.ID+"/roles/"+id,
+			roleBody(r, p.GradientsAvailable), nil); err != nil {
+			return fmt.Errorf("update role %s: %w", r.Name, err)
+		}
+		fmt.Fprintf(out, "  updated role %s\n", r.Name)
 	}
 
 	// 2. hierarchy. guild.toml is highest first, and Discord's position is
@@ -450,17 +528,9 @@ func (c *discordClient) applyPlan(g *discord.Guild, live discord.Live, p *discor
 
 	// 4. channels
 	for _, ch := range g.Channels {
-		overwrites := []map[string]any{}
-		for _, o := range ch.Overwrites() {
-			id, ok := roleID[o.Role]
-			if !ok {
-				return fmt.Errorf("channel %s names role %q, which has no id", ch.Name, o.Role)
-			}
-			overwrites = append(overwrites, map[string]any{
-				"id": id, "type": 0,
-				"allow": strconv.FormatInt(o.Allow, 10),
-				"deny":  strconv.FormatInt(o.Deny, 10),
-			})
+		overwrites, err := overwriteBody(ch, liveChan[ch.Name], roleID)
+		if err != nil {
+			return err
 		}
 
 		if todo[discord.CreateChannel][ch.Name] {

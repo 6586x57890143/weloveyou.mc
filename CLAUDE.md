@@ -95,7 +95,10 @@ scripts/            CI helpers that must also run by hand. brand.py holds the vi
                     pages cannot drift apart. weloveyou-pack's pack-site.py carries a
                     copy of the palette and a comment naming brand.py as the source.
 docs/               DISCORD.md, the design reference for the bot half
-guild.toml          the Discord server, declared. DESIGN ONLY, no reconciler yet
+guild.toml          the Discord server, declared. RECONCILED (D1): `wly guild` diffs
+                    roles, hierarchy, categories, channels, channel permissions and
+                    emoji against the live guild; `--apply` creates and updates and
+                    never deletes
 ```
 
 **Dependencies point inward.** `internal/packwiz` and `internal/mcevents` are pure: no
