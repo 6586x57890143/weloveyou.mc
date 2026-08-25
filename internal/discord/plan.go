@@ -57,7 +57,29 @@ type LiveChannel struct {
 	Name     string
 	Category string
 	Topic    string
+
+	// Overwrites is the channel's permission overwrites as Discord reports
+	// them, with role names resolved by the caller. Without them a channel
+	// whose privacy was changed by hand reads as matching guild.toml, because
+	// topic and category still do. #ops carries spend and health and #feed is
+	// the private half of the server, so that is not a cosmetic gap.
+	Overwrites []LiveOverwrite
 }
+
+// LiveOverwrite is one permission overwrite on a live channel. Type is
+// Discord's: 0 role, 1 member. Role is the resolved name when Type is
+// OverwriteRole and the role is known, "" otherwise.
+type LiveOverwrite struct {
+	ID    string
+	Type  int
+	Role  string
+	Allow int64
+	Deny  int64
+}
+
+// OverwriteRole is Discord's overwrite type for a role. Member overwrites are
+// type 1: read and preserved, never written.
+const OverwriteRole = 0
 
 // Kind is what an action does. Ordered so a plan reads roles before channels,
 // because a channel's permissions reference roles that may not exist yet.
@@ -273,6 +295,9 @@ func planChannels(want *Guild, live Live, p *Plan) {
 		if cur.Category != w.Category {
 			diffs = append(diffs, fmt.Sprintf("category %q -> %q", cur.Category, w.Category))
 		}
+		if d := overwriteDiff(w, cur); d != "" {
+			diffs = append(diffs, d)
+		}
 		if len(diffs) > 0 {
 			p.Actions = append(p.Actions, Action{UpdateChannel, w.Name, strings.Join(diffs, ", ")})
 		}
@@ -288,6 +313,78 @@ func planChannels(want *Guild, live Live, p *Plan) {
 				"present on the server, absent from guild.toml"})
 		}
 	}
+}
+
+// overwriteDiff describes how a live channel's permissions differ from what its
+// declared readonly and visible_to flags mean, or "" when they do not.
+//
+// Only the bits guild.toml decides are compared, and only for the roles it
+// names. Everything else on the channel belongs to whoever put it there.
+func overwriteDiff(want Channel, cur LiveChannel) string {
+	live := map[string]LiveOverwrite{}
+	for _, o := range cur.Overwrites {
+		if o.Type == OverwriteRole {
+			live[o.Role] = o
+		}
+	}
+	var out []string
+	for _, w := range want.Overwrites() {
+		got := live[w.Role] // absent reads as no bits, which is the right diff
+		if got.Allow&ManagedPerms == w.Allow && got.Deny&ManagedPerms == w.Deny {
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s allow %s -> %s, deny %s -> %s", w.Role,
+			permNames(got.Allow&ManagedPerms), permNames(w.Allow),
+			permNames(got.Deny&ManagedPerms), permNames(w.Deny)))
+	}
+	return strings.Join(out, "; ")
+}
+
+// permNames renders the managed bits. A raw 1024 in a plan is unreadable, and
+// this is the line someone reads while deciding whether #ops is exposed.
+func permNames(bits int64) string {
+	var out []string
+	if bits&PermViewChannel != 0 {
+		out = append(out, "view")
+	}
+	if bits&PermSendMessages != 0 {
+		out = append(out, "send")
+	}
+	if len(out) == 0 {
+		return "none"
+	}
+	return strings.Join(out, "+")
+}
+
+// MergeOverwrites returns the overwrite set to send, given what guild.toml
+// declares and what the channel carries now.
+//
+// It merges rather than replaces because Discord's PATCH replaces the whole
+// set. Sending only the declared overwrites would strip a moderator role's
+// access, or one member's, as a side effect of fixing a topic. Apply never
+// deletes, and this is where that rule meets an API that would.
+//
+// A new entry has no ID; the caller resolves it from the role name, the same
+// split every other id in this package uses.
+func MergeOverwrites(want []Overwrite, live []LiveOverwrite) []LiveOverwrite {
+	out := append([]LiveOverwrite(nil), live...)
+	at := map[string]int{}
+	for i, o := range out {
+		if o.Type == OverwriteRole {
+			at[o.Role] = i
+		}
+	}
+	for _, w := range want {
+		i, ok := at[w.Role]
+		if !ok {
+			out = append(out, LiveOverwrite{Type: OverwriteRole, Role: w.Role,
+				Allow: w.Allow, Deny: w.Deny})
+			continue
+		}
+		out[i].Allow = out[i].Allow&^ManagedPerms | w.Allow
+		out[i].Deny = out[i].Deny&^ManagedPerms | w.Deny
+	}
+	return out
 }
 
 func planEmojis(want *Guild, live Live, p *Plan) {
@@ -385,6 +482,12 @@ const (
 	PermViewChannel  int64 = 1 << 10
 	PermSendMessages int64 = 1 << 11
 )
+
+// ManagedPerms is every bit guild.toml gets to decide. Diffing and applying are
+// both masked to it, so a bit a human set by hand -- Manage Messages on a
+// moderator role, say -- is neither reported as drift on every run nor wiped by
+// the next apply.
+const ManagedPerms = PermViewChannel | PermSendMessages
 
 // Everyone is the @everyone role. Discord gives it the guild's own id, which
 // the caller substitutes; naming it here keeps that trick out of the API layer.

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -438,4 +440,108 @@ func TestMissingMembersWarnsButDoesNotAbort(t *testing.T) {
 	if !strings.Contains(out.String(), "could not check whether any application") {
 		t.Errorf("silently skipped the bot check:\n%s", out.String())
 	}
+}
+
+// The gap this closes: Compute emitted UpdateRole, Render printed it, and apply
+// had no branch for it. --apply said "applying:" and issued nothing, which is
+// the silent no-op this whole package is built to avoid.
+func TestApplyUpdatesAnExistingRole(t *testing.T) {
+	routes := guildRoutes()
+	// player exists but is the wrong colour, so the only planned change is one
+	// role update.
+	routes["/guilds/42/roles"] = `[
+		{"id":"9","name":"wly","managed":true,"position":50},
+		{"id":"3","name":"player","color":0,"position":1},
+		{"id":"1","name":"@everyone","position":0}
+	]`
+
+	writes := recordWrites(t, routes)
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42"),
+		"--icons", filepath.Join("..", "..", "icons.toml"), "--apply"}, &out); err != nil {
+		t.Fatalf("apply failed: %v ~ %s", err, out.String())
+	}
+
+	if !strings.Contains(strings.Join(writes.paths, " "), "PATCH /guilds/42/roles/3") {
+		t.Fatalf("apply never updated the role. it issued: %v", writes.paths)
+	}
+	if !strings.Contains(out.String(), "updated role player") {
+		t.Errorf("apply did not report the update: %s", out.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(writes.bodyFor("PATCH /guilds/42/roles/3")), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["color"] != float64(0x8E8677) {
+		t.Errorf("PATCH sent color %v, want the colour guild.toml declares", body["color"])
+	}
+}
+
+// Discord's PATCH replaces the whole overwrite set. Correcting a topic must not
+// revoke somebody's access as a side effect, because apply never deletes.
+func TestApplyKeepsAnOverwriteGuildTomlDoesNotDeclare(t *testing.T) {
+	routes := guildRoutes()
+	routes["/guilds/42/channels"] = `[
+		{"id":"c1","name":"the server","type":4},
+		{"id":"c2","name":"general","type":0,"topic":"stale","parent_id":"c1",
+		 "permission_overwrites":[{"id":"kon","type":1,"allow":"1024","deny":"0"}]}
+	]`
+
+	writes := recordWrites(t, routes)
+	t.Setenv("WLY_DISCORD_TOKEN", "test-token")
+	var out bytes.Buffer
+	if err := runGuild([]string{"--config", testConfig(t, "42"),
+		"--icons", filepath.Join("..", "..", "icons.toml"), "--apply"}, &out); err != nil {
+		t.Fatalf("apply failed: %v ~ %s", err, out.String())
+	}
+
+	body := writes.bodyFor("PATCH /channels/c2")
+	if body == "" {
+		t.Fatalf("apply never fixed the topic. it issued: %v", writes.paths)
+	}
+	if !strings.Contains(body, `"kon"`) {
+		t.Errorf("the hand-made member overwrite was dropped by a topic fix: %s", body)
+	}
+}
+
+// recordWrites stands in for Discord and keeps every non-GET, body included, so
+// a test can assert on what was actually sent rather than only that something was.
+type writeLog struct {
+	paths  []string
+	bodies []string
+}
+
+func (w *writeLog) bodyFor(path string) string {
+	for i, p := range w.paths {
+		if p == path {
+			return w.bodies[i]
+		}
+	}
+	return ""
+}
+
+func recordWrites(t *testing.T, routes map[string]string) *writeLog {
+	t.Helper()
+	log := &writeLog{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			raw, _ := io.ReadAll(r.Body)
+			log.paths = append(log.paths, r.Method+" "+r.URL.Path)
+			log.bodies = append(log.bodies, string(raw))
+			_, _ = w.Write([]byte(`{"id":"new"}`))
+			return
+		}
+		if body, ok := routes[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	t.Cleanup(srv.Close)
+	old := discordAPI
+	discordAPI = srv.URL
+	t.Cleanup(func() { discordAPI = old })
+	return log
 }
