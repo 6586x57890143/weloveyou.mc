@@ -34,8 +34,10 @@ func run(args []string, out io.Writer) error {
 		return runSurfaces(args[1:], out)
 	case "bench":
 		return benchCmd(args[1:], out)
-	case "", "serve":
-		return fmt.Errorf("%q is not implemented yet (phase 0 skeleton)", cmd)
+	case "serve":
+		return runServe(args[1:], out)
+	case "":
+		return fmt.Errorf("no command given; try: version | serve | bench | guild | surfaces")
 	default:
 		return fmt.Errorf("unknown command %q; try: version | serve | bench | guild | surfaces", cmd)
 	}

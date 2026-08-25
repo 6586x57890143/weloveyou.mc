@@ -84,8 +84,15 @@ func TestUUIDIsLowercased(t *testing.T) {
 func TestParseIgnores(t *testing.T) {
 	for _, line := range []string{
 		"",
-		"[12:00:01] [Server thread/INFO]: Done (12.345s)! For help, type \"help\"",
 		"[12:00:01] [Server thread/INFO]: <kon> denwa joined the game",
+		// Chat that looks exactly like a death. The angle brackets are the
+		// whole defence, because a death line has no marker of its own.
+		"[12:00:01] [Server thread/INFO]: <kon> was slain by a zombie",
+		"[12:00:01] [Server thread/INFO]: <kon> fell from a high place",
+		// A mod talking about something that is not a player. A name is at
+		// most 16 characters of [A-Za-z0-9_], which is what excludes these.
+		"[12:00:01] [Server thread/INFO]: some.block.entity died",
+		"[12:00:01] [Server thread/INFO]: [Oritech] machine blew up",
 		"[12:00:01] [Server thread/INFO]: <kon> UUID of player admin is 1",
 		"[12:00:01] [Server thread/WARN]: Can't keep up! Is the server overloaded?",
 		"not a log line at all",
@@ -215,4 +222,65 @@ func FuzzParse(f *testing.F) {
 			}
 		}
 	})
+}
+
+// Deaths are the only lines with no marker, so they get their own table.
+// Verified shapes: the phrase table in death.go is a vocabulary, and adding
+// 1.22's messages should be adding strings to it.
+func TestParseDeaths(t *testing.T) {
+	for _, tc := range []struct{ line, player, detail string }{
+		{"[12:00:01] [Server thread/INFO]: kon fell from a high place",
+			"kon", "fell from a high place"},
+		{"[12:00:01] [Server thread/INFO]: denwa was slain by Zombie",
+			"denwa", "was slain by Zombie"},
+		{"[12:00:01] [Server thread/INFO]: m tried to swim in lava to escape Blaze",
+			"m", "tried to swim in lava to escape Blaze"},
+		{"[12:00:01] [Server thread/INFO]: ellis was blown up by Creeper",
+			"ellis", "was blown up by Creeper"},
+		{"[12:00:01] [Server thread/INFO]: kon drowned",
+			"kon", "drowned"},
+		{"[12:00:01] [Server thread/INFO]: kon withered away",
+			"kon", "withered away"},
+		{"[12:00:01] [Server thread/INFO]: kon was squashed by a falling anvil",
+			"kon", "was squashed by a falling anvil"},
+	} {
+		e, ok := Parse(tc.line)
+		if !ok {
+			t.Errorf("%q was not read as a death", tc.line)
+			continue
+		}
+		if e.Kind != Died || e.Player != tc.player || e.Detail != tc.detail {
+			t.Errorf("%q -> %v/%q/%q, want died/%q/%q",
+				tc.line, e.Kind, e.Player, e.Detail, tc.player, tc.detail)
+		}
+	}
+}
+
+// The order of the phrase table is load-bearing: Go's alternation is
+// leftmost-first, so a prefix listed before the longer phrase would swallow it
+// and drop the reason.
+func TestLongerDeathPhraseWins(t *testing.T) {
+	e, ok := Parse("[12:00:01] [Server thread/INFO]: kon died because of Skeleton")
+	if !ok || e.Detail != "died because of Skeleton" {
+		t.Errorf("detail = %q, want the whole sentence rather than just \"died\"", e.Detail)
+	}
+}
+
+// The lifecycle. RCON cannot answer "is it up": a server that is still starting
+// refuses the connection exactly like one that is down, and those are very
+// different things to tell a player.
+func TestParseLifecycle(t *testing.T) {
+	e, ok := Parse(`[12:00:01] [Server thread/INFO]: Done (12.345s)! For help, type "help"`)
+	if !ok || e.Kind != ServerReady {
+		t.Fatalf("startup line -> %v/%v", e.Kind, ok)
+	}
+	if e.Detail != "12.345s" {
+		t.Errorf("detail = %q, want the boot time", e.Detail)
+	}
+	if e.Player != "" {
+		t.Errorf("player = %q, a lifecycle event has none", e.Player)
+	}
+	if e, ok := Parse("[12:00:01] [Server thread/INFO]: Stopping the server"); !ok || e.Kind != ServerStopping {
+		t.Errorf("stop line -> %v/%v", e.Kind, ok)
+	}
 }

@@ -389,6 +389,9 @@ func permNames(bits int64) string {
 	if bits&PermSendMessages != 0 {
 		out = append(out, "send")
 	}
+	if bits&PermReadHistory != 0 {
+		out = append(out, "history")
+	}
 	if len(out) == 0 {
 		return "none"
 	}
@@ -520,13 +523,20 @@ func Render(p *Plan) string {
 const (
 	PermViewChannel  int64 = 1 << 10
 	PermSendMessages int64 = 1 << 11
+	// PermReadHistory is separate from viewing, and forgetting it is a quiet
+	// disaster rather than a locked door. A bot that can see a channel but not
+	// read its history gets an EMPTY LIST back from GET /messages rather than a
+	// 403, so `wly surfaces` concludes it has never posted there and posts
+	// again, every single run, for ever. Measured on the live guild: #feed
+	// returned [] with the bot holding view and send.
+	PermReadHistory int64 = 1 << 16
 )
 
 // ManagedPerms is every bit guild.toml gets to decide. Diffing and applying are
 // both masked to it, so a bit a human set by hand -- Manage Messages on a
 // moderator role, say -- is neither reported as drift on every run nor wiped by
 // the next apply.
-const ManagedPerms = PermViewChannel | PermSendMessages
+const ManagedPerms = PermViewChannel | PermSendMessages | PermReadHistory
 
 // Everyone is the @everyone role. Discord gives it the guild's own id, which
 // the caller substitutes; naming it here keeps that trick out of the API layer.
@@ -572,7 +582,7 @@ func (c Channel) Overwrites(botRole string) []Overwrite {
 		// surface it holds.
 		if botRole != "" {
 			out = append(out, Overwrite{Role: botRole,
-				Allow: PermViewChannel | PermSendMessages})
+				Allow: PermViewChannel | PermSendMessages | PermReadHistory})
 		}
 	}
 	for _, r := range c.VisibleTo {
