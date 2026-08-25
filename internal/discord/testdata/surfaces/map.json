@@ -1,8 +1,8 @@
 {
   "_meta": {
+    "note": "Ambient, never urgent. The render is a squaremap tile crop and does not exist yet. The Activity button is the D4 payoff.",
     "surface": "map",
-    "title": "Map card",
-    "note": "Ambient, never urgent. The render is a squaremap tile crop and does not exist yet. The Activity button is the D4 payoff."
+    "title": "Map card"
   },
   "flags": 32768,
   "components": [

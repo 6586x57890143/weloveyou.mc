@@ -1,8 +1,8 @@
 {
   "_meta": {
+    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it.",
     "surface": "events.firstjoin",
-    "title": "Event feed, firstjoin",
-    "note": "One message per event, small on purpose. The accent is the type, which is what makes a feed scannable without reading it."
+    "title": "Event feed, firstjoin"
   },
   "flags": 32768,
   "components": [

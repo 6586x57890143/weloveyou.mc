@@ -1,8 +1,8 @@
 {
   "_meta": {
+    "note": "One pinned message, edited in place, never reposted. Accent is state: info healthy, base degraded, lose down. The relative timestamp ticks client-side, so the board stays honest between edits.",
     "surface": "status",
-    "title": "Status board",
-    "note": "One pinned message, edited in place, never reposted. Accent is state: info healthy, base degraded, lose down. The relative timestamp ticks client-side, so the board stays honest between edits."
+    "title": "Status board"
   },
   "flags": 32768,
   "components": [
@@ -12,7 +12,7 @@
       "components": [
         {
           "type": 10,
-          "content": "# wly <:heart:>\n-# up <t:1787580000:R> · edited in place, never reposted"
+          "content": "# wly <:heart:>\n-# up <t:1787580000:R>"
         },
         {
           "type": 14,
@@ -36,7 +36,7 @@
         },
         {
           "type": 10,
-          "content": "### the world\nday **412** · **19.98** TPS · **8.4ms** p95 tick"
+          "content": "### the world\nday **412** · **19.98** TPS"
         },
         {
           "type": 10,
@@ -49,7 +49,7 @@
         },
         {
           "type": 10,
-          "content": "-# next backup <t:1787632200:R>. numbers refresh every minute."
+          "content": "-# next backup <t:1787632200:R>"
         }
       ]
     }

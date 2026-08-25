@@ -65,7 +65,11 @@ func GetStarted(d GetStartedData) Payload {
 		// The pre-launch disclosure is non-negotiable. Importing a Prism
 		// instance runs its pre-launch command with no warning from Prism, and
 		// that is how the auto-update works, so the card says so out loud.
-		Text("-# **worth knowing:** importing this instance lets prism run a small updater before every launch. that is what keeps your mods in sync, so a pack update never asks anything of you. the updater ships inside the zip and we check it on the way in, nothing gets downloaded fresh at launch. if you would rather skip all that, grab the .mrpack from the pack page and update by hand."),
+		// SHORTER, NOT GONE. This is a consent notice: importing the instance
+		// lets Prism run a command before every launch, and Prism itself warns
+		// nobody. It is on the master plan's risk register. Trimmed to the two
+		// facts that matter, which is what makes it likely to be read.
+		Text("-# **worth knowing:** prism runs a small updater before each launch, which is what keeps your mods in sync. it ships inside the zip and we check it on the way in. if you would rather not, take the .mrpack from the pack page and update by hand."),
 	)
 }
 
@@ -113,11 +117,14 @@ type StatusData struct {
 // The accent is the state: info healthy, base degraded, lose down. Nothing else
 // in the card has to shout, because the colour already did.
 func Status(d StatusData) Payload {
+	// 50ms is one tick. Past that the server is not keeping up, whatever the
+	// TPS says, because TPS is capped at 20 and hides exactly this.
+	degraded := d.Degraded || (d.HasTick && d.MSPTp95 > 50)
 	accent := AccentInfo
 	switch {
 	case !d.Up:
 		accent = AccentLose
-	case d.Degraded:
+	case degraded:
 		accent = AccentBase
 	}
 
@@ -125,20 +132,22 @@ func Status(d StatusData) Payload {
 	// "2026 years ago", which is what the first live post of this board actually
 	// said. Uptime is genuinely unknown when the daemon starts after the server
 	// and DOCKER_HOST is unset, and saying nothing is the honest version of that.
-	when := "edited in place, never reposted"
+	// No note about how the message is maintained. Nobody reading a status
+	// board wants to know it is edited rather than reposted; that is a fact
+	// about us, not about the server.
+	when := "up and running"
 	if !d.Since.IsZero() {
-		when = "up " + Rel(d.Since) + " · edited in place, never reposted"
+		when = "up " + Rel(d.Since)
+	}
+	if !d.Up {
+		when = "down right now"
+		if !d.Since.IsZero() {
+			when = "down since " + Rel(d.Since)
+		}
 	}
 	head := Text("# wly <:heart:>\n-# %s", when)
-	if !d.Up {
-		down := "down"
-		if !d.Since.IsZero() {
-			down = "down since " + Rel(d.Since)
-		}
-		head = Text("# wly <:heart:>\n-# %s", down)
-	}
 
-	who := "nobody right now"
+	who := "nobody right now, the whole world is yours"
 	if n := len(d.Online); n > 0 {
 		who = fmt.Sprintf("**%d** of us right now\n%s", n, strings.Join(d.Online, ", "))
 	}
@@ -148,11 +157,14 @@ func Status(d StatusData) Payload {
 	// as response time. Printing an unmeasured 20.0 TPS would be exactly the
 	// "flag the JVM accepts and then ignores" failure, in a place every player
 	// reads.
-	world := fmt.Sprintf("### the world\nday **%d** · **%dms** server response",
-		d.WorldDay, d.Latency.Milliseconds())
+	// "p95 tick" and "server response" are our words, not a player's. What a
+	// player wants from this line is the day and whether it is running well,
+	// and TPS is the number Minecraft players already read. The p95 is not
+	// thrown away: it decides the accent above, so a struggling server turns
+	// amber without anybody having to parse a percentile.
+	world := fmt.Sprintf("### the world\nday **%d**", d.WorldDay)
 	if d.HasTick {
-		world = fmt.Sprintf("### the world\nday **%d** · **%.2f** TPS · **%.1fms** p95 tick",
-			d.WorldDay, d.TPS, d.MSPTp95)
+		world = fmt.Sprintf("### the world\nday **%d** · **%.2f** TPS", d.WorldDay, d.TPS)
 	}
 
 	return Container(accent,
@@ -166,7 +178,7 @@ func Status(d StatusData) Payload {
 		// corruption rather than as a missing value.
 		Text("### the pack\n%s · minecraft %s", boldOrUnknown(VersionLabel(d.PackVersion)), d.MCVersion),
 		Separator(false, 2),
-		Text("-# next backup %s. numbers refresh every minute.", Rel(d.NextBackup)),
+		Text("-# next backup %s", Rel(d.NextBackup)),
 	)
 }
 
@@ -245,11 +257,11 @@ func Spend(d SpendData) Payload {
 		accent = AccentBase
 	}
 
-	body := fmt.Sprintf("yesterday **%s**\nmonth to date **%s**\nprojected **%s** of %s",
+	body := fmt.Sprintf("yesterday **%s**\nthis month **%s**\non track for **%s** of %s",
 		money(d.Yesterday, d.Currency), money(d.MonthToDate, d.Currency),
 		money(d.Projected, d.Currency), amount(d.Budget, d.Currency))
 	if d.ReportedMissed {
-		body = "no cost report on the box at all. that is the alert, not the spend."
+		body = "no spend report today"
 	}
 
 	return Container(accent,
@@ -257,8 +269,7 @@ func Spend(d SpendData) Payload {
 		divider(d.Strip),
 		Text("%s", body),
 		Separator(false, 2),
-		Text("-# credits expire %s. a null amount is reported as unknown, never as zero.",
-			Date(d.CreditsExpire)),
+		Text("-# credits expire %s", Date(d.CreditsExpire)),
 	)
 }
 
@@ -461,10 +472,8 @@ type JoinRequestData struct {
 // exact syntax as an exercise is a card that gets ignored until later.
 func JoinRequest(d JoinRequestData) Payload {
 	return Container(AccentBase,
-		Text("<:player:> **%s** tried to join and is not on the whitelist\n-# %s",
-			d.Player, d.UUID),
+		Text("<:player:> **%s** wants in\n-# %s", d.Player, d.UUID),
 		divider(d.Strip),
-		Text("```\nwhitelist add %s\n```\n-# mojang already proved this is them, "+
-			"so the name is theirs. run it in game or over rcon.", d.Player),
+		Text("```\nwhitelist add %s\n```", d.Player),
 	)
 }

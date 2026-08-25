@@ -1,7 +1,9 @@
 package discord
 
 import (
+	"bytes"
 	"encoding/json"
+	"flag"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,9 +20,14 @@ import (
 
 // goldenEquals compares a built payload against a committed one, ignoring the
 // _meta block, which is documentation for the renderer and never sent.
+// updateGolden rewrites the committed payloads instead of comparing against
+// them. Off by default, so a drift is a failure rather than a silent rewrite.
+var updateGolden = flag.Bool("update", false, "rewrite the design payloads from the builders")
+
 func goldenEquals(t *testing.T, name string, got Payload) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "surfaces", name+".json"))
+	path := filepath.Join("testdata", "surfaces", name+".json")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -28,6 +35,7 @@ func goldenEquals(t *testing.T, name string, got Payload) {
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
 	}
+	meta := want["_meta"]
 	delete(want, "_meta")
 
 	gotRaw, err := json.Marshal(got)
@@ -37,6 +45,44 @@ func goldenEquals(t *testing.T, name string, got Payload) {
 	var gotMap map[string]any
 	if err := json.Unmarshal(gotRaw, &gotMap); err != nil {
 		t.Fatal(err)
+	}
+
+	// -update rewrites the design payloads from the builders, preserving the
+	// _meta block. The goldens are the DESIGN as well as the test target, so a
+	// deliberate copy change would otherwise mean hand-editing JSON to match Go
+	// character for character, which is how the two drift apart.
+	if *updateGolden {
+		// Marshal the STRUCT, not the map. Struct field order is the authored
+		// order, so the file keeps "type" before its payload the way a person
+		// wrote it; marshalling a map sorts keys alphabetically and shuffles
+		// every block. And SetEscapeHTML(false), or every <:heart:> in the
+		// design becomes <:heart:>, which nobody can read.
+		//
+		// These files are the DESIGN as much as the fixture. Regenerating them
+		// must not cost their readability.
+		var buf bytes.Buffer
+		enc := json.NewEncoder(&buf)
+		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(got); err != nil {
+			t.Fatal(err)
+		}
+		body := strings.TrimSpace(buf.String())
+		body = strings.TrimPrefix(body, "{")
+
+		var metaBuf bytes.Buffer
+		menc := json.NewEncoder(&metaBuf)
+		menc.SetIndent("  ", "  ")
+		menc.SetEscapeHTML(false)
+		if err := menc.Encode(meta); err != nil {
+			t.Fatal(err)
+		}
+		out := "{\n  \"_meta\": " + strings.TrimSpace(metaBuf.String()) + "," + body + "\n"
+		if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("updated %s", path)
+		return
 	}
 
 	wantPretty, _ := json.MarshalIndent(want, "", "  ")
@@ -284,8 +330,10 @@ func TestStatusWillNotInventTickHealth(t *testing.T) {
 	if strings.Contains(world, "TPS") || strings.Contains(world, "p95") {
 		t.Errorf("the board claimed tick health with no source: %q", world)
 	}
-	if !strings.Contains(world, "**37ms** server response") {
-		t.Errorf("the board dropped the one number it can measure: %q", world)
+	// The player-facing line is the day and, when something can answer, the TPS.
+	// "server response" and "p95 tick" were our words rather than a player's.
+	if strings.Contains(world, "server response") {
+		t.Errorf("ops jargon reached the player board: %q", world)
 	}
 	if !strings.Contains(world, "day **412**") {
 		t.Errorf("the world day went missing: %q", world)
