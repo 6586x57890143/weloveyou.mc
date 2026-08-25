@@ -130,6 +130,21 @@ jobs:
       # on. `only` and `shards` are free text; the rest are choice or numeric
       # inputs today and are quoted the same way anyway, so a later edit to the
       # input list cannot quietly reintroduce this.
+      # A box can arrive here with a poweroff already scheduled against it, and
+      # that poweroff will happily take this job down with it.
+      #
+      # Measured on 2026-08-25: a sweep was cancelled, its `if: always()` power
+      # down step ran at 11:49:39 and scheduled `shutdown -h +1`, a re-dispatch
+      # 18 seconds later put shard 3/3 on that same box at 11:49:56, and the box
+      # went down at 11:50:52 taking the shard with it. The job reported a bare
+      # "cancelled" with no cause anywhere in its log, and the sweep would have
+      # published a two-thirds-complete matrix as if it were whole.
+      #
+      # `shutdown -c` cancels a pending shutdown and is a no-op when there is
+      # none, so this is safe unconditionally and cheap.
+      - name: cancel any poweroff a previous job left scheduled
+        run: sudo shutdown -c 2>/dev/null || true
+
       - name: run the sweep
         env:
           OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
@@ -171,9 +186,25 @@ jobs:
       #
       # A timer on the production box brings it back 15 minutes before the next
       # scheduled sweep, and a nightly one stops it if this step never ran.
+      # NOT if another job is on this box. `always()` includes cancellation, and
+      # a cancelled run powering the box off is correct for billing but must not
+      # take a live job with it, which is exactly what happened on 2026-08-25.
+      #
+      # Our own job is a Runner.Worker, so one worker means only us and anything
+      # above that is somebody else's sweep. `wly-bench-selfstop.timer` on the
+      # box already guards itself the same way; this closes the same hole in the
+      # workflow. Leaving the box up is the safe direction to fail: the nightly
+      # idle timer stops it anyway, so the worst case is hours of idle billing
+      # rather than a silently truncated sweep.
       - name: power down the bench box
         if: always()
         run: |
+          workers=$(pgrep -cf 'Runner\.Worker' || true)
+          if [ "${workers:-0}" -gt 1 ]; then
+            echo "another job is running here ($workers workers); leaving the box up"
+            echo "the nightly idle timer will stop it if that job also leaves it running"
+            exit 0
+          fi
           echo "sweep finished; powering off to stop billing"
           sudo shutdown -h +1 "bench sweep complete" || sudo poweroff
 
@@ -216,11 +247,31 @@ jobs:
         id: gate
         env:
           OUT: ${{ github.event.inputs.out || 'BENCHMARKS.md' }}
+          SHARDS: ${{ github.event.inputs.shards || '["1/1"]' }}
         run: |
           set -uo pipefail
           files=$(find shards -name 'shard.json' | paste -sd, -)
           if [ -z "$files" ]; then
             echo "verdict=empty" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A MISSING SHARD IS NOT A PARTIAL RESULT, IT IS A WRONG ONE.
+          #
+          # merge runs `if: always()`, so one dead shard still reaches here and
+          # the table renders from whatever arrived. Two thirds of the matrix
+          # published as though it were the whole thing is the same failure as a
+          # workload that measures nothing and prints a plausible row: nothing
+          # about the output says a third of it is missing.
+          #
+          # Found on 2026-08-25, when a shard was killed by another run's
+          # poweroff and this would have published 2/3 of a screening pass
+          # straight to main.
+          expected=$(printf '%s' "$SHARDS" | grep -o '"[0-9]*/[0-9]*"' | wc -l)
+          got=$(find shards -name 'shard.json' | wc -l)
+          if [ "$expected" -gt 0 ] && [ "$got" -lt "$expected" ]; then
+            echo "::error::only $got of $expected shards produced results; holding"
+            echo "verdict=hold" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Structural problems only: a sweep measured on two machines, against

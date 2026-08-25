@@ -234,6 +234,29 @@ mapping, which was true from the box and irrelevant from the internet.
 
 ### Traps that cost real time
 
+**Cancelling a bench run powers its box off a minute later, and will take a new
+job down with it.** The `power down the bench box` step is `if: always()`, which
+includes cancellation, and that is correct for billing: a cancelled sweep must
+not leave a box running for a week. What it also does is schedule
+`shutdown -h +1` on a box that may be about to pick up something else. Measured
+2026-08-25: a run was cancelled at 11:49:39, a re-dispatch 18 seconds later put
+shard 3/3 on that same box at 11:49:56, and the box went down at 11:50:52. The
+job reported a bare "cancelled" with no cause anywhere in its own log, which is
+what makes it expensive to diagnose the second time.
+
+Two guards now, both in `bench.yml`: a job clears any pending poweroff when it
+starts (`shutdown -c`), and the poweroff step refuses to fire when more than one
+`Runner.Worker` is alive on the box. If you cancel a sweep and re-dispatch by
+hand anyway, **stop and start the boxes explicitly** rather than trusting that a
+pending shutdown has passed.
+
+**A dead shard used to publish as a whole sweep.** `merge` is `if: always()`, so
+one failed shard still reached it and the table rendered from whatever arrived,
+straight to `main`. Two thirds of a matrix published as though it were all of it
+is the same failure as a workload that measures nothing and prints a plausible
+row. The gate now compares the number of `shard.json` artifacts against the
+`shards` input and holds instead of publishing.
+
 **Minecraft closes the RCON connection on an empty command.** Most RCON clients
 end a multi-packet reply by sending an empty command and watching for its answer.
 Here that drops the socket: every query came back `read size: EOF` while dial and
