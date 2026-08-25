@@ -229,6 +229,37 @@ mapping, which was true from the box and irrelevant from the internet.
 
 ### Traps that cost real time
 
+**Discord silently mangles channel names, and answers 200 while doing it.** The
+emoji-prefix convention (`💬│general`) needs a separator, and picking one is
+measurement, not taste. Discord rewrites every character Unicode calls
+whitespace into a hyphen, and strips every zero-width one, returning success
+either way. Applied one candidate per channel on the live guild and read them
+back: U+00A0 became a hyphen; U+2800, U+3164 and U+2063 were stripped; U+2502
+`│` survived. U+17B5 is the one that looks like a win and is not, it survives
+storage but measures **0px wide** in Discord's own font, so the file matches, the
+reconciler goes quiet, and the name renders exactly as if there were no
+separator. A stripped separator is worse than none: the file can then never
+match what Discord stored, so the plan reports the same rename forever and stops
+meaning anything.
+
+**Renaming a channel is rate limited to two changes per ten minutes, per
+channel**, and `retry_after` comes back in the 180-450 second range rather than
+the seconds an API rate limit usually means. A rename sweep across eight
+channels does not finish in one `--apply`, which is normal rather than a
+failure. Apply says which cause it hit and carries on to the channels it can
+still touch, because a fixed block of "check your permissions" printed under a
+rate-limit error is the confidently-wrong output this repo exists to avoid.
+
+**A private channel locks the bot out of itself.** `visible_to` denies
+`@everyone` VIEW\_CHANNEL, which denies it to `wly` too, and `wly` is the only
+thing that ever writes the pinned surface in there. Worse, it cannot fix itself:
+granting the access requires editing a channel it cannot see, so the request
+that would repair it is the one being refused. Recovering needs a human in
+Server Settings. `Channel.Overwrites` now emits the bot's own view+send grant in
+the same payload as the deny, so the two land atomically and no channel can be
+created into that state again. That applies to temporary event channels exactly
+as much as to `#ops`.
+
 **A compose profile does not gate interpolation.** Adding a `db` service with
 `POSTGRES_PASSWORD: "${DB_PASSWORD:?...}"` broke `docker compose up -d` on every
 box that had not set it, including one that only runs Minecraft. Putting the
@@ -560,7 +591,17 @@ the bot so the layout work is not thrown away. What landed:
 | `docs/DISCORD.md` | the reference: limits, colour system, data sources, perk sheet, the Activity |
 | `internal/discord/testdata/surfaces/*.json` | the surfaces, as real Components V2 payloads. Mockup and golden file are the same artifact. |
 | `scripts/discord-mocks.py` | renders them into one comparable page, and validates against the API's limits while it does |
-| `guild.toml` | the Discord server declared. Design only; the reconciler is D1. |
+| `guild.toml` | the Discord server declared. **D1 is done and applied**: roles, hierarchy, categories, channels, channel permissions, names and emoji all reconcile. |
+| `internal/discord/surface.go`, `surfaces.go` | **D2, in progress**: the six surfaces built in Go and checked against the D0 payloads as golden files. |
+| `cmd/wly surfaces` | posts and edits the pinned messages. Finds its own message by author rather than storing an id, because Discord already knows and a second source of truth can disagree with what people are looking at. |
+
+**D2 status: get-started is live in `#👋│start-here`.** The other five are
+blocked on data that does not exist yet and `wly surfaces` says so per surface
+rather than posting a plausible hole: status needs RCON and the log tail, spend
+needs `/var/lib/wly/cost.json` which is on the box, events needs the log bridge,
+map needs a published render (`weloveyou-pack.pages.dev/assets/map-latest.png`
+currently answers 200 with `text/html`, which is the Pages fallback, not an
+image), and release is an event rather than something reconciled.
 
 **The mockup is the payload**, so a design cannot promise a layout Components V2
 refuses to build. `ci.yml` runs the validator on every PR for the same reason it

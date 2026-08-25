@@ -27,6 +27,8 @@ type Guild struct {
 	Roles    []Role    `toml:"roles"`
 	Channels []Channel `toml:"channels"`
 	Emojis   Emojis    `toml:"emojis"`
+
+	Interactions Interactions `toml:"interactions"`
 }
 
 type Meta struct {
@@ -63,6 +65,13 @@ type Colors struct {
 }
 
 type Channel struct {
+	// ID is the Discord channel id, and it is what makes a rename possible.
+	// Matching on the name alone means changing one reads as "create a second
+	// channel and abandon the first", which is how a config file destroys a
+	// channel of history without ever issuing a delete. Empty is fine: a
+	// channel that does not exist yet has no id, and matching falls back to the
+	// name until it does.
+	ID        string   `toml:"id"`
 	Name      string   `toml:"name"`
 	Category  string   `toml:"category"`
 	Topic     string   `toml:"topic"`
@@ -74,6 +83,17 @@ type Channel struct {
 type Emojis struct {
 	Source string   `toml:"source"`
 	Upload []string `toml:"upload"`
+}
+
+// Interactions is every custom_id the surfaces are allowed to use.
+//
+// Declaring them is not bookkeeping. A custom_id a surface emits and nothing
+// handles is a button that does nothing when pressed, which is worse than an
+// absent one because a player has already committed to it by then. A test walks
+// the built surfaces against this list.
+type Interactions struct {
+	Buttons []string `toml:"buttons"`
+	Modals  []string `toml:"modals"`
 }
 
 // Load reads and validates guild.toml. Validation is not decoration: every rule
@@ -137,6 +157,7 @@ func (g *Guild) Validate() error {
 	}
 
 	seen = map[string]bool{}
+	seenID := map[string]string{}
 	for i, c := range g.Channels {
 		switch {
 		case strings.TrimSpace(c.Name) == "":
@@ -151,6 +172,18 @@ func (g *Guild) Validate() error {
 				"no spaces, or it will not match what Discord stores", c.Name)
 		}
 		seen[c.Name] = true
+
+		if c.ID != "" {
+			if _, err := strconv.ParseUint(c.ID, 10, 64); err != nil {
+				return fmt.Errorf("guild config: channel %q has id %q, which is "+
+					"not a Discord snowflake", c.Name, c.ID)
+			}
+			if seenID[c.ID] != "" {
+				return fmt.Errorf("guild config: channels %q and %q both claim "+
+					"id %s", seenID[c.ID], c.Name, c.ID)
+			}
+			seenID[c.ID] = c.Name
+		}
 
 		for _, role := range c.VisibleTo {
 			if !g.hasRole(role) {

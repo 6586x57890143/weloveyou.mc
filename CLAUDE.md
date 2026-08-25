@@ -42,6 +42,9 @@ say which plan it belongs to.
 go run ./cmd/wly guild                    # diff guild.toml against the real server
 go run ./cmd/wly guild --apply            # ... and make the changes
 
+go run ./cmd/wly surfaces                 # what the pinned messages would say
+go run ./cmd/wly surfaces --apply         # ... and post or edit them in place
+
 go run ./cmd/wly bench --dry-run          # preflight only, measures nothing
 go run ./cmd/wly bench --only j25-g1-coh --workload pack --runs 1
 
@@ -75,10 +78,13 @@ cmd/wly/            server daemon, bench harness today; bot, log bridge and RCON
 cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
 internal/bench/     JVM flag profiles, workload driver, result table
-internal/discord/   PURE: guild.toml parsing and the reconciler diff. No HTTP, no
-                    token, no gateway, so the code that decides to change a live
-                    community is testable without one. testdata/surfaces/ holds the
-                    Components V2 payloads, which are both mockup and golden file.
+internal/discord/   PURE: guild.toml parsing, the reconciler diff, and the six
+                    surfaces. No HTTP, no token, no gateway, so the code that
+                    decides to change a live community is testable without one.
+                    testdata/surfaces/ holds the Components V2 payloads, which are
+                    mockup, golden file and the thing surfaces.go is tested
+                    against, all at once. Every number a surface shows arrives on
+                    a Data struct, so a surface cannot invent one.
 
 PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
@@ -404,8 +410,22 @@ of the few places the split costs something.
     47.5% locally was 28.8% in CI, against a floor of 30.
   - **Leave margin.** Landing exactly on the floor is a failure waiting for the
     next commit: 99.0 against a floor of 99 went red in CI at 98.9.
+- **A surface never invents a number.** Every field on a `*Data` struct comes
+  from a caller that read it from somewhere real, and a surface whose data source
+  does not exist yet is SKIPPED OUT LOUD by `wly surfaces` rather than filled with
+  a plausible value. Silently missing is indistinguishable from failed to post.
 - **Coverage floors ratchet upward only.** Raise a floor when a package earns it; never lower
   one to make a red build green. `.coverage-floors` carries the reasoning.
+- **Channel names are `<emoji>│<name>`**, the separator being U+2502 BOX DRAWINGS
+  LIGHT VERTICAL. One emoji per channel, fitting, never decorative. The bar is
+  visible because a blank one does not exist: Discord turns whitespace into a
+  hyphen and strips zero-width characters, answering 200 either way. `guild.toml`
+  carries the full measurement and HANDOFF the trap. Renames are rate limited to
+  two per ten minutes per channel, so a sweep takes several `--apply` runs.
+- **A channel that hides itself must grant `wly` view and send in the same
+  breath.** `Channel.Overwrites` does this; do not hand-roll an overwrite that
+  skips it. A bot cannot grant itself access to a channel it cannot see, so the
+  recovery is a human in Server Settings.
 - **Keep the dependency list short.** Adding one needs justification in the commit message.
 - **Mark deliberate shortcuts** with a `ponytail:` comment naming the ceiling and the upgrade
   path, so `/ponytail-debt` can find them later.

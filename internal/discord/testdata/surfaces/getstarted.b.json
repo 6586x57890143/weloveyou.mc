@@ -26,14 +26,14 @@
           "components": [
             {
               "type": 10,
-              "content": "### 3. link and join\npress the button, give your minecraft name, then connect. your first join is what proves it is you.\n```\n158.180.53.71\n```"
+              "content": "### 1. install prism launcher\nany launcher will run the pack. only prism keeps it up to date for you."
             }
           ],
           "accessory": {
             "type": 2,
-            "style": 1,
-            "label": "link my account",
-            "custom_id": "link_start"
+            "style": 5,
+            "label": "prism launcher",
+            "url": "https://prismlauncher.org/download/"
           }
         },
         {
@@ -47,7 +47,7 @@
           "accessory": {
             "type": 2,
             "style": 5,
-            "label": "the .zip",
+            "label": "right click, copy link",
             "url": "https://weloveyou-pack.pages.dev/pack/stable/weloveyou-stable.zip"
           }
         },

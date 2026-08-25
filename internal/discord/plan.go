@@ -259,12 +259,46 @@ func checkHierarchy(want *Guild, live Live) error {
 		live.BotHighestRole, strings.Join(above, ", "), live.BotHighestRole)
 }
 
-func planChannels(want *Guild, live Live, p *Plan) {
-	byName := map[string]LiveChannel{}
-	for _, c := range live.Channels {
-		byName[c.Name] = c
+// MatchChannel finds the live channel a declared one refers to.
+//
+// The id wins when it is set, because the name is the field most likely to
+// change and matching on it means a rename reads as "create a second channel
+// and abandon the first". That is how a config file destroys a channel of
+// history without ever issuing a delete, which is the one thing apply promises
+// it cannot do. Name is the fallback, for a channel that has no id yet because
+// it has never been created.
+func MatchChannel(w Channel, live Live) (LiveChannel, bool) {
+	if w.ID != "" {
+		for _, c := range live.Channels {
+			if c.ID == w.ID {
+				return c, true
+			}
+		}
+		// Declared with an id that is not there: the channel was deleted, or
+		// the id is wrong. Either way it is not "the one with the same name",
+		// because that may be a different channel entirely.
+		return LiveChannel{}, false
 	}
+	for _, c := range live.Channels {
+		if c.Name == w.Name {
+			return c, true
+		}
+	}
+	return LiveChannel{}, false
+}
 
+// liveKey identifies a live channel for bookkeeping. The id when there is one,
+// the name otherwise, so a guild whose channels have not been created yet still
+// gets an honest drift report rather than one where every unnamed channel
+// collides on the empty string.
+func liveKey(c LiveChannel) string {
+	if c.ID != "" {
+		return "id:" + c.ID
+	}
+	return "name:" + c.Name
+}
+
+func planChannels(want *Guild, live Live, p *Plan) {
 	haveCategory := map[string]bool{}
 	for _, c := range live.Channels {
 		if c.Category != "" {
@@ -278,8 +312,9 @@ func planChannels(want *Guild, live Live, p *Plan) {
 		}
 	}
 
+	matched := map[string]bool{} // live channels a declared one accounts for
 	for _, w := range want.Channels {
-		cur, exists := byName[w.Name]
+		cur, exists := MatchChannel(w, live)
 		if !exists {
 			d := "in " + w.Category
 			if w.Surface != "" {
@@ -288,14 +323,18 @@ func planChannels(want *Guild, live Live, p *Plan) {
 			p.Actions = append(p.Actions, Action{CreateChannel, w.Name, d})
 			continue
 		}
+		matched[liveKey(cur)] = true
 		var diffs []string
+		if cur.Name != w.Name {
+			diffs = append(diffs, fmt.Sprintf("name %q -> %q", cur.Name, w.Name))
+		}
 		if cur.Topic != w.Topic {
 			diffs = append(diffs, fmt.Sprintf("topic %q -> %q", cur.Topic, w.Topic))
 		}
 		if cur.Category != w.Category {
 			diffs = append(diffs, fmt.Sprintf("category %q -> %q", cur.Category, w.Category))
 		}
-		if d := overwriteDiff(w, cur); d != "" {
+		if d := overwriteDiff(w, cur, live.BotHighestRole); d != "" {
 			diffs = append(diffs, d)
 		}
 		if len(diffs) > 0 {
@@ -303,12 +342,12 @@ func planChannels(want *Guild, live Live, p *Plan) {
 		}
 	}
 
-	declared := map[string]bool{}
-	for _, c := range want.Channels {
-		declared[c.Name] = true
-	}
+	// Drift is what nothing declared accounts for. Matching by id rather than
+	// by name is what keeps a renamed channel out of this list: on the name
+	// alone, every rename would report the original as drift at the same moment
+	// it created its replacement.
 	for _, c := range live.Channels {
-		if !declared[c.Name] {
+		if !matched[liveKey(c)] {
 			p.Drift = append(p.Drift, Action{Drift, "channel " + c.Name,
 				"present on the server, absent from guild.toml"})
 		}
@@ -320,7 +359,7 @@ func planChannels(want *Guild, live Live, p *Plan) {
 //
 // Only the bits guild.toml decides are compared, and only for the roles it
 // names. Everything else on the channel belongs to whoever put it there.
-func overwriteDiff(want Channel, cur LiveChannel) string {
+func overwriteDiff(want Channel, cur LiveChannel, botRole string) string {
 	live := map[string]LiveOverwrite{}
 	for _, o := range cur.Overwrites {
 		if o.Type == OverwriteRole {
@@ -328,7 +367,7 @@ func overwriteDiff(want Channel, cur LiveChannel) string {
 		}
 	}
 	var out []string
-	for _, w := range want.Overwrites() {
+	for _, w := range want.Overwrites(botRole) {
 		got := live[w.Role] // absent reads as no bits, which is the right diff
 		if got.Allow&ManagedPerms == w.Allow && got.Deny&ManagedPerms == w.Deny {
 			continue
@@ -508,7 +547,16 @@ type Overwrite struct {
 // created without these is readable by everyone, and #ops carries spend and
 // health. Getting it wrong is not a cosmetic bug, so it is decided here where
 // it is tested, not inline in an HTTP call.
-func (c Channel) Overwrites() []Overwrite {
+//
+// botRole is the role wly itself wears, and it is not decoration. A restriction
+// applies to the bot like it applies to anyone: denying @everyone view denies it
+// to wly too, and wly is the only thing that ever writes the pinned surface in
+// there. Applying such a channel without this locks the bot out of exactly the
+// channels it exists to maintain, and the bill arrives as a 403 on some LATER
+// run, far from the change that caused it. Learned that way, on the live guild,
+// renaming #feed. An empty botRole skips the grant, for a caller that does not
+// know the name yet.
+func (c Channel) Overwrites(botRole string) []Overwrite {
 	var out []Overwrite
 	deny := int64(0)
 	if len(c.VisibleTo) > 0 {
@@ -519,6 +567,13 @@ func (c Channel) Overwrites() []Overwrite {
 	}
 	if deny != 0 {
 		out = append(out, Overwrite{Role: Everyone, Deny: deny})
+		// Whatever was taken from @everyone, wly keeps. Send included: a
+		// readonly channel is readonly for people, not for the thing whose
+		// surface it holds.
+		if botRole != "" {
+			out = append(out, Overwrite{Role: botRole,
+				Allow: PermViewChannel | PermSendMessages})
+		}
 	}
 	for _, r := range c.VisibleTo {
 		// Granted the view back, but NOT send: a readonly channel stays readonly
