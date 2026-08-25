@@ -380,3 +380,43 @@ func TestReleaseOmitsEmptyNotes(t *testing.T) {
 		t.Error("real notes were dropped")
 	}
 }
+
+// The card an admin acts on. The exact command is spelled out because the admin
+// reading it is on a phone half the time, and a card that says "whitelist them"
+// and leaves the syntax as an exercise gets ignored until later.
+func TestJoinRequestCarriesWhatAnAdminNeeds(t *testing.T) {
+	p := JoinRequest(JoinRequestData{Player: "denwa", UUID: "6dc57b83-7a60"})
+	var all string
+	for _, c := range p.Components[0].Components {
+		all += c.Content
+	}
+	for _, want := range []string{"denwa", "6dc57b83-7a60", "whitelist add denwa"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("the card omits %q: %s", want, all)
+		}
+	}
+	// Base accent: something needs a human, but nothing is broken.
+	if got := *p.Components[0].AccentColor; got != AccentBase {
+		t.Errorf("accent = #%06X, want base", got)
+	}
+}
+
+// The step that used to be a button must not have become one again. Nothing
+// handles interactions, so a custom_id here is a player pressing something that
+// fails.
+func TestGetStartedHasNoUnhandledButton(t *testing.T) {
+	var walk func([]Component)
+	walk = func(cs []Component) {
+		for _, c := range cs {
+			if c.CustomID != "" {
+				t.Errorf("custom_id %q is back on the welcome card, and nothing "+
+					"handles interactions", c.CustomID)
+			}
+			walk(c.Components)
+			if c.Accessory != nil {
+				walk([]Component{*c.Accessory})
+			}
+		}
+	}
+	walk(GetStarted(GetStartedData{ServerAddress: "10.0.0.1"}).Components)
+}

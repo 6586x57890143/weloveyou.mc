@@ -432,12 +432,16 @@ func (d *daemon) askToLetThemIn(player, uuid string) {
 	fmt.Fprintf(d.out, "asked ops to whitelist %s\n", player)
 }
 
+// whitelistPath is a var so tests can point it at a fixture. wly mounts mc-data
+// read-only at /mc, so this is a read and can never be anything else.
+var whitelistPath = "/mc/whitelist.json"
+
 // whitelisted reads the server's own whitelist.json, which wly has mounted
 // read-only at /mc. The second return is false when the file could not be read
 // at all, which is different from "not on the list" and must not be treated as
 // it.
 func whitelisted(player string) (bool, bool) {
-	raw, err := os.ReadFile("/mc/whitelist.json")
+	raw, err := os.ReadFile(whitelistPath)
 	if err != nil {
 		return false, false
 	}
