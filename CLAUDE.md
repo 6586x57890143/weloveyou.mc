@@ -206,7 +206,16 @@ Half of that is the plan and half of it is the bug, and they are easy to mix up:
   strangers to point traffic at. Until then the closed port is the decision, not an
   oversight. Note that DNS is not a control: an A record pointing at `158.180.53.71` does
   nothing to who can reach it, the security list is the only gate, and behind that the
-  protections are `ONLINE_MODE` and `ENFORCE_WHITELIST` in `docker-compose.yml`.
+  protections are `ONLINE_MODE`, `ENABLE_WHITELIST` and `ENFORCE_WHITELIST` in
+  `docker-compose.yml`.
+
+  **CORRECTED 2026-08-25: `ENABLE_WHITELIST` was missing and the whitelist was
+  therefore OFF.** The live server read `enforce-whitelist=true` with
+  `white-list=false`, which means anyone reaching the port was let in.
+  `ENFORCE_WHITELIST` alone governs only whether already-connected players are
+  kicked when the list reloads; it cannot enforce a whitelist that is not on.
+  Only the closed port made this survivable, and opening 25565 is the plan, so
+  it would have become a public server with a whitelist that did nothing.
 - **`docker-compose.yml` reads as though the ports were already public.** It publishes 25565
   and 24454/udp and carries a long comment about the voice-chat port, none of which is
   reachable from the internet. Those mappings are correct and are what will make the port

@@ -114,6 +114,30 @@ services:
       ENABLE_RCON: "true"
       RCON_PASSWORD: "${RCON_PASSWORD:?set RCON_PASSWORD in deploy/.env}"
       ONLINE_MODE: "true"
+
+      # BOTH of these are needed and only one was here. ENABLE_WHITELIST is what
+      # sets `white-list` in server.properties; ENFORCE_WHITELIST sets
+      # `enforce-whitelist`, which only governs whether ALREADY CONNECTED
+      # players are kicked when the list reloads. On its own it does nothing,
+      # because there is no whitelist in force to enforce.
+      #
+      # Read off the live server on 2026-08-25:
+      #
+      #   enforce-whitelist=true
+      #   white-list=false        <- anyone who can reach the port gets in
+      #
+      # OVERRIDE_SERVER_PROPERTIES is true, so the file is rewritten from this
+      # environment on EVERY start: turning it on by hand on the box would last
+      # exactly until the next restart. It has to be here.
+      #
+      # This was survivable only by accident. 25565 is filtered from the
+      # internet and reachable over the tailnet alone, so the exposure was to
+      # tailnet peers rather than to everybody. The plan is to open that port
+      # once there is a domain, and on that day this would have been a public
+      # server with a whitelist that did nothing. CLAUDE.md named
+      # ENFORCE_WHITELIST as one of the two protections behind the firewall,
+      # which was not true.
+      ENABLE_WHITELIST: "true"
       ENFORCE_WHITELIST: "true"
 
       # Two lines, because the server list gives you two and wasting one is a
