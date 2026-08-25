@@ -30,11 +30,13 @@ func run(args []string, out io.Writer) error {
 		return nil
 	case "guild":
 		return runGuild(args[1:], out)
+	case "surfaces":
+		return runSurfaces(args[1:], out)
 	case "bench":
 		return benchCmd(args[1:], out)
 	case "", "serve":
 		return fmt.Errorf("%q is not implemented yet (phase 0 skeleton)", cmd)
 	default:
-		return fmt.Errorf("unknown command %q; try: version | serve | bench | guild", cmd)
+		return fmt.Errorf("unknown command %q; try: version | serve | bench | guild | surfaces", cmd)
 	}
 }

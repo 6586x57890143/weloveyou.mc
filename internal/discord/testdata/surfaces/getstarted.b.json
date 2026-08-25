@@ -47,7 +47,7 @@
           "accessory": {
             "type": 2,
             "style": 5,
-            "label": "the .zip",
+            "label": "right click, copy link",
             "url": "https://weloveyou-pack.pages.dev/pack/stable/weloveyou-stable.zip"
           }
         },

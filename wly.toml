@@ -21,6 +21,22 @@ container = "wly-mc"
 [cost]
 report_path = "/var/lib/wly/cost.json"
 
+# The facts the pinned surfaces state. They live here rather than inside the
+# payload builders because a surface that hardcodes an address cannot be
+# corrected without cutting a release, and these are exactly the values that
+# move: the box gets a domain, the pack gets a new path.
+#
+# map_image is deliberately empty. Nothing renders and publishes a map crop yet,
+# and `wly surfaces` skips that card out loud rather than posting a broken image
+# into a channel every player can see.
+[surfaces]
+server_address = "158.180.53.71"
+map_url        = "http://100.103.121.9:8123/"
+instance_zip   = "https://weloveyou-pack.pages.dev/pack/stable/weloveyou-stable.zip"
+pack_page      = "https://weloveyou-pack.pages.dev/pack/stable/"
+prism_image    = "https://weloveyou-pack.pages.dev/assets/prism-import.png"
+map_image      = ""
+
 [discord]
 guild_id = ""
 # One pinned message per surface; wly edits in place rather than reposting.

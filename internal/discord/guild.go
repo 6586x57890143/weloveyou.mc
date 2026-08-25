@@ -27,6 +27,8 @@ type Guild struct {
 	Roles    []Role    `toml:"roles"`
 	Channels []Channel `toml:"channels"`
 	Emojis   Emojis    `toml:"emojis"`
+
+	Interactions Interactions `toml:"interactions"`
 }
 
 type Meta struct {
@@ -81,6 +83,17 @@ type Channel struct {
 type Emojis struct {
 	Source string   `toml:"source"`
 	Upload []string `toml:"upload"`
+}
+
+// Interactions is every custom_id the surfaces are allowed to use.
+//
+// Declaring them is not bookkeeping. A custom_id a surface emits and nothing
+// handles is a button that does nothing when pressed, which is worse than an
+// absent one because a player has already committed to it by then. A test walks
+// the built surfaces against this list.
+type Interactions struct {
+	Buttons []string `toml:"buttons"`
+	Modals  []string `toml:"modals"`
 }
 
 // Load reads and validates guild.toml. Validation is not decoration: every rule

@@ -591,7 +591,17 @@ the bot so the layout work is not thrown away. What landed:
 | `docs/DISCORD.md` | the reference: limits, colour system, data sources, perk sheet, the Activity |
 | `internal/discord/testdata/surfaces/*.json` | the surfaces, as real Components V2 payloads. Mockup and golden file are the same artifact. |
 | `scripts/discord-mocks.py` | renders them into one comparable page, and validates against the API's limits while it does |
-| `guild.toml` | the Discord server declared. Design only; the reconciler is D1. |
+| `guild.toml` | the Discord server declared. **D1 is done and applied**: roles, hierarchy, categories, channels, channel permissions, names and emoji all reconcile. |
+| `internal/discord/surface.go`, `surfaces.go` | **D2, in progress**: the six surfaces built in Go and checked against the D0 payloads as golden files. |
+| `cmd/wly surfaces` | posts and edits the pinned messages. Finds its own message by author rather than storing an id, because Discord already knows and a second source of truth can disagree with what people are looking at. |
+
+**D2 status: get-started is live in `#👋│start-here`.** The other five are
+blocked on data that does not exist yet and `wly surfaces` says so per surface
+rather than posting a plausible hole: status needs RCON and the log tail, spend
+needs `/var/lib/wly/cost.json` which is on the box, events needs the log bridge,
+map needs a published render (`weloveyou-pack.pages.dev/assets/map-latest.png`
+currently answers 200 with `text/html`, which is the Pages fallback, not an
+image), and release is an event rather than something reconciled.
 
 **The mockup is the payload**, so a design cannot promise a layout Components V2
 refuses to build. `ci.yml` runs the validator on every PR for the same reason it
