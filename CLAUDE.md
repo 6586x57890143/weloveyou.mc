@@ -406,6 +406,16 @@ of the few places the split costs something.
     next commit: 99.0 against a floor of 99 went red in CI at 98.9.
 - **Coverage floors ratchet upward only.** Raise a floor when a package earns it; never lower
   one to make a red build green. `.coverage-floors` carries the reasoning.
+- **Channel names are `<emoji>│<name>`**, the separator being U+2502 BOX DRAWINGS
+  LIGHT VERTICAL. One emoji per channel, fitting, never decorative. The bar is
+  visible because a blank one does not exist: Discord turns whitespace into a
+  hyphen and strips zero-width characters, answering 200 either way. `guild.toml`
+  carries the full measurement and HANDOFF the trap. Renames are rate limited to
+  two per ten minutes per channel, so a sweep takes several `--apply` runs.
+- **A channel that hides itself must grant `wly` view and send in the same
+  breath.** `Channel.Overwrites` does this; do not hand-roll an overwrite that
+  skips it. A bot cannot grant itself access to a channel it cannot see, so the
+  recovery is a human in Server Settings.
 - **Keep the dependency list short.** Adding one needs justification in the commit message.
 - **Mark deliberate shortcuts** with a `ponytail:` comment naming the ceiling and the upgrade
   path, so `/ponytail-debt` can find them later.
