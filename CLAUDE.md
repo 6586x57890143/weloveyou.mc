@@ -42,6 +42,9 @@ say which plan it belongs to.
 go run ./cmd/wly guild                    # diff guild.toml against the real server
 go run ./cmd/wly guild --apply            # ... and make the changes
 
+go run ./cmd/wly serve                    # the daemon: log bridge, board, spend
+go run ./cmd/wly serve --once             # refresh the surfaces once and exit
+
 go run ./cmd/wly surfaces                 # what the pinned messages would say
 go run ./cmd/wly surfaces --apply         # ... and post or edit them in place
 
@@ -74,7 +77,10 @@ advisories that `govulncheck` fails CI on).
 ## Architecture
 
 ```
-cmd/wly/            server daemon, bench harness today; bot, log bridge and RCON later
+cmd/wly/            server daemon and bench harness. `serve` runs three loops: the
+                    log bridge, the status board and the spend post. engine.go is a
+                    READ-ONLY Docker inspect, through the socket proxy, for one fact
+                    (when the container started)
 cmd/wlyup/          player-side pack updater. STUB: only `version` works
 internal/buildinfo/ version stamp injected by -ldflags, shared by both binaries
 internal/bench/     JVM flag profiles, workload driver, result table
@@ -88,7 +94,12 @@ internal/discord/   PURE: guild.toml parsing, the reconciler diff, and the six
 
 PLANNED, NOT YET WRITTEN. This block described them as if they existed:
 internal/packwiz/   PURE: pack.toml/index.toml parsing, resolution, hashing, diff, sync
-internal/mcevents/  PURE: log line -> event, one regex table per MC generation
+internal/mcevents/  PURE: log line -> event, one regex table per MC generation.
+                    death.go is a vocabulary rather than a pattern, because a death
+                    line carries no marker at all
+internal/rcon/      Source RCON, stdlib. Minecraft CLOSES THE CONNECTION on an empty
+                    command, so replies end at the 4096-byte split, never a sentinel
+internal/logtail/   tail -F, across rotation and truncation, starting at the end
 worker/             Cloudflare Worker, read-only
 
 deploy/             Dockerfile for wly, docker-compose.yml for mc + wly,
@@ -410,6 +421,12 @@ of the few places the split costs something.
     47.5% locally was 28.8% in CI, against a floor of 30.
   - **Leave margin.** Landing exactly on the floor is a failure waiting for the
     next commit: 99.0 against a floor of 99 went red in CI at 98.9.
+- **Nothing on the server could answer for TPS until spark shipped**, and the
+  board showed measured RCON response time rather than invent one.
+  `StatusData.HasTick` is the switch. spark MUST run with
+  `-Dspark.backgroundProfiler=false` on Java 25 / aarch64, in compose and in
+  `internal/bench/runner.go` alike, or its bundled async-profiler segfaults the
+  JVM at boot.
 - **A surface never invents a number.** Every field on a `*Data` struct comes
   from a caller that read it from somewhere real, and a surface whose data source
   does not exist yet is SKIPPED OUT LOUD by `wly surfaces` rather than filled with

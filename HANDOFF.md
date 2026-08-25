@@ -229,6 +229,31 @@ mapping, which was true from the box and irrelevant from the internet.
 
 ### Traps that cost real time
 
+**Minecraft closes the RCON connection on an empty command.** Most RCON clients
+end a multi-packet reply by sending an empty command and watching for its answer.
+Here that drops the socket: every query came back `read size: EOF` while dial and
+auth had both succeeded, so the first live status board reported the server UP
+with day 0 and 0ms. The end of a reply is inferred from the 4096-byte split
+instead. A failure that looks like healthy-but-zero is worse than an error.
+
+**READ_MESSAGE_HISTORY is separate from VIEW_CHANNEL, and missing it returns an
+EMPTY LIST rather than a 403.** Denying `@everyone` view takes history with it,
+and the bot's grant only restored view and send. `GET /messages` then comes back
+`[]`, so `wly surfaces` concludes it has never posted there and posts again on
+every run. Every private surface would have grown duplicates instead of one
+edited message. `Channel.Overwrites` grants it now.
+
+**Discord embeds cannot be sized, and three ways of faking it do not work.** A
+Components V2 Container has no width property and takes the width of its widest
+child. Padding with U+2007 is STRIPPED from message content, a Separator has no
+intrinsic width, and a Section accessory sits after the text. Only a Media
+Gallery image has a real width, which is why `assets/feed-strip.png` exists: it
+is layout that also carries the brand, not an ornament.
+
+**The cost report was never mounted into the wly container.** It reads
+`/var/lib/wly/cost.json`, which lives on the host, so the spend surface would
+have reported "no cost report on the box at all" for ever while the box had one.
+
 **Discord silently mangles channel names, and answers 200 while doing it.** The
 emoji-prefix convention (`💬│general`) needs a separator, and picking one is
 measurement, not taste. Discord rewrites every character Unicode calls
