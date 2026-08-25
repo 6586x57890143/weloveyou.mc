@@ -41,10 +41,26 @@ services:
       # in 27. Permit it explicitly so the behaviour does not change under us
       # when the base image moves. JEP 472 likewise wants native access granted
       # rather than merely warned about.
+      #
+      # -Dspark.backgroundProfiler=false IS NOT OPTIONAL now that spark ships in
+      # pack/stable. spark starts a BACKGROUND async-profiler on servers by
+      # default, and its bundled async-profiler is 2.9 from 2022, which
+      # segfaults the JVM on Java 25 / aarch64 at boot. That cost ten restart
+      # loops on this box once already, and internal/bench/runner.go carries the
+      # same flag for the same reason: the bench harness and the live server
+      # must not run spark differently, or the numbers measure a server nobody
+      # plays on.
+      #
+      # Disabling it leaves `/spark tps` working, because tick timing comes from
+      # spark's own hook and never touches the native agent. That is the whole
+      # reason spark is here: it is the only thing on this server that can
+      # answer for TPS and MSPT, and until it landed the status board showed
+      # measured RCON response time instead rather than invent them.
       JVM_OPTS: >-
         --sun-misc-unsafe-memory-access=allow
         --enable-native-access=ALL-UNNAMED
         --illegal-native-access=allow
+        -Dspark.backgroundProfiler=false
         ${MC_JVM_OPTS:-}
       # G1 with Aikar's tuning is the right default under a 16G heap. Any other
       # profile is JVM_XX_OPTS, never a code change, see BENCHMARKS.md.
