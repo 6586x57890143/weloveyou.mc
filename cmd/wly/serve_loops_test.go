@@ -246,3 +246,85 @@ func TestDialFailsCleanlyWithNothingListening(t *testing.T) {
 		t.Error("dialled a server that is not there")
 	}
 }
+
+func writeWhitelist(t *testing.T, body string) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "whitelist.json")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := whitelistPath
+	whitelistPath = p
+	t.Cleanup(func() { whitelistPath = old })
+}
+
+// The real file, as the live server writes it.
+func TestWhitelistedReadsTheServersOwnFile(t *testing.T) {
+	writeWhitelist(t, `[{"name":"denwa","uuid":"6dc57b83-7a60-4b47-baf4-f5ce8c501953"}]`)
+
+	if listed, ok := whitelisted("denwa"); !ok || !listed {
+		t.Errorf("denwa = %v %v, want listed", listed, ok)
+	}
+	// Minecraft names are case-insensitive for this purpose.
+	if listed, ok := whitelisted("DENWA"); !ok || !listed {
+		t.Errorf("case-different name was not matched")
+	}
+	if listed, ok := whitelisted("stranger"); !ok || listed {
+		t.Errorf("stranger = %v %v, want not listed but readable", listed, ok)
+	}
+}
+
+// Unreadable is NOT the same as not-listed, and conflating them posts every
+// single join to #ops and trains everyone to ignore the channel.
+func TestUnreadableWhitelistIsNotTakenAsEmpty(t *testing.T) {
+	writeWhitelist(t, `{ this is not a whitelist`)
+	if _, ok := whitelisted("denwa"); ok {
+		t.Error("garbage parsed as a readable whitelist")
+	}
+	old := whitelistPath
+	whitelistPath = filepath.Join(t.TempDir(), "absent.json")
+	t.Cleanup(func() { whitelistPath = old })
+	if _, ok := whitelisted("denwa"); ok {
+		t.Error("a missing file parsed as a readable whitelist")
+	}
+}
+
+// A stranger reaches an admin; a regular does not; and neither has to type
+// anything.
+func TestAskToLetThemIn(t *testing.T) {
+	writeWhitelist(t, `[{"name":"denwa","uuid":"6dc57b83"}]`)
+	d, rec := liveDaemon(t)
+
+	d.askToLetThemIn("denwa", "6dc57b83") // already on the list
+	if len(rec.Paths()) != 0 {
+		t.Errorf("posted about a whitelisted player: %v", rec.Paths())
+	}
+
+	d.askToLetThemIn("stranger", "abc-123")
+	if len(rec.Paths()) != 1 {
+		t.Fatalf("a stranger did not reach ops: %v", rec.Paths())
+	}
+	body := strings.Join(rec.Bodies(), "")
+	for _, want := range []string{"stranger", "abc-123", "whitelist add stranger"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the ops card omits %q: %s", want, body)
+		}
+	}
+
+	// A client retrying every few seconds must not fill the channel.
+	d.askToLetThemIn("stranger", "abc-123")
+	d.askToLetThemIn("stranger", "abc-123")
+	if len(rec.Paths()) != 1 {
+		t.Errorf("asked %d times about one player", len(rec.Paths()))
+	}
+}
+
+func TestAskToLetThemInNeedsBothNameAndUUID(t *testing.T) {
+	writeWhitelist(t, `[]`)
+	d, rec := liveDaemon(t)
+	d.askToLetThemIn("", "abc")
+	d.askToLetThemIn("someone", "")
+	if len(rec.Paths()) != 0 {
+		t.Errorf("posted on incomplete input: %v", rec.Paths())
+	}
+}
