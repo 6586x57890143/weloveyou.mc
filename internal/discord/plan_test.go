@@ -42,7 +42,7 @@ func liveMatching() Live {
 				{ID: "42", Type: OverwriteRole, Role: Everyone, Deny: PermViewChannel},
 				{ID: "p", Type: OverwriteRole, Role: "player", Allow: PermViewChannel},
 				{ID: "b", Type: OverwriteRole, Role: "wly",
-					Allow: PermViewChannel | PermSendMessages},
+					Allow: PermViewChannel | PermSendMessages | PermReadHistory},
 			}},
 		},
 		Emojis: []string{"heart", "skull"},
@@ -666,5 +666,27 @@ func TestChannelIDMustBeASnowflake(t *testing.T) {
 	g.Channels[0].ID, g.Channels[1].ID = "7", "7"
 	if err := g.Validate(); err == nil {
 		t.Fatal("accepted two channels claiming the same id")
+	}
+}
+
+// Reading history is a SEPARATE permission from seeing the channel, and missing
+// it is a quiet disaster rather than a locked door: GET /messages returns an
+// empty list rather than a 403, so `wly surfaces` concludes it has never posted
+// and posts again on every run, for ever.
+func TestPrivateChannelLetsTheBotReadItsOwnHistory(t *testing.T) {
+	for _, c := range []Channel{
+		{Name: "ops", VisibleTo: []string{"admin"}},
+		{Name: "status", ReadOnly: true},
+	} {
+		var bot Overwrite
+		for _, o := range c.Overwrites("wly") {
+			if o.Role == "wly" {
+				bot = o
+			}
+		}
+		if bot.Allow&PermReadHistory == 0 {
+			t.Errorf("%s: the bot cannot read its own past messages, so it would "+
+				"repost its surface rather than edit it", c.Name)
+		}
 	}
 }
