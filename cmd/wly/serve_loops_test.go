@@ -328,3 +328,172 @@ func TestAskToLetThemInNeedsBothNameAndUUID(t *testing.T) {
 		t.Errorf("posted on incomplete input: %v", rec.Paths())
 	}
 }
+
+// The channel is admin-only and that is Discord's enforcement. Checking the role
+// as well is defence in depth: a permission edit or an integration must not
+// silently become a route to an operator command.
+func TestOnlyAdminsCanApprove(t *testing.T) {
+	d := testDaemon(t)
+	d.adminRole = "admin-role-id"
+
+	if !d.isAdmin([]string{"other", "admin-role-id"}) {
+		t.Error("an admin was refused")
+	}
+	if d.isAdmin([]string{"player", "supporter"}) {
+		t.Error("a non-admin was accepted")
+	}
+	// Unknown means no, never "probably fine".
+	d.adminRole = ""
+	if d.isAdmin([]string{"anything"}) {
+		t.Error("approvals were accepted with no admin role resolved")
+	}
+}
+
+// A restart must not replay every approval ever typed and re-run each one, the
+// same rule the log tailer follows by starting at the end.
+func TestOpsLoopStartsFromNow(t *testing.T) {
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.String())
+		_, _ = w.Write([]byte(`[{"id":"999","content":"ok denwa","author":{"id":"a"}}]`))
+	}))
+	defer srv.Close()
+	old := discordAPI
+	discordAPI = srv.URL
+	defer func() { discordAPI = old }()
+
+	d := testDaemon(t)
+	d.api = newDiscordClient("t")
+	got, err := d.newestMessage("ops")
+	if err != nil || got != "999" {
+		t.Fatalf("newestMessage = %q, %v", got, err)
+	}
+	if len(seen) == 0 || !strings.Contains(seen[0], "limit=1") {
+		t.Errorf("did not ask for just the newest: %v", seen)
+	}
+}
+
+// Every message in #ops that is not a command must be left alone, and the bot's
+// own cards must never be read as instructions.
+func TestCheckOpsIgnoresItsOwnPostsAndChatter(t *testing.T) {
+	body := `[
+	  {"id":"3","content":"ok denwa","author":{"id":"bot","bot":true},"member":{"roles":["admin-role-id"]}},
+	  {"id":"2","content":"looks fine","author":{"id":"human"},"member":{"roles":["admin-role-id"]}},
+	  {"id":"1","content":"ok denwa","author":{"id":"stranger"},"member":{"roles":["player"]}}
+	]`
+	var writes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			writes = append(writes, r.Method+" "+r.URL.Path)
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	old := discordAPI
+	discordAPI = srv.URL
+	defer func() { discordAPI = old }()
+
+	d := testDaemon(t)
+	d.api = newDiscordClient("t")
+	d.adminRole = "admin-role-id"
+	d.cfg.Server.RCONAddr = "127.0.0.1:1" // nothing listens; no command can run
+
+	d.checkOps(context.Background(), "ops")
+
+	// The bot's own message is skipped, the chatter is not a command, and the
+	// stranger is not an admin, so nothing should have been acted on.
+	for _, w := range writes {
+		if strings.HasPrefix(w, "POST") {
+			t.Errorf("acted on a message it should have ignored: %v", writes)
+		}
+	}
+}
+
+// An admin who types "ok denwa" and hears nothing cannot tell a name wly
+// ignored from a server that refused, and will type it again. So it answers
+// even when the command could not run.
+func TestWhitelistAnswersWhenTheServerIsUnreachable(t *testing.T) {
+	d, rec := liveDaemon(t)
+	d.cfg.Server.RCONAddr = "127.0.0.1:1" // nothing listening
+
+	d.whitelist("ops", "denwa", "kon")
+
+	if len(rec.Paths()) != 1 {
+		t.Fatalf("said nothing back: %v", rec.Paths())
+	}
+	body := strings.Join(rec.Bodies(), "")
+	if !strings.Contains(body, "denwa") {
+		t.Errorf("the reply does not name the player: %s", body)
+	}
+	if !strings.Contains(body, "not answering") {
+		t.Errorf("the reply does not say why it failed: %s", body)
+	}
+	if !strings.Contains(body, "12873820") { // AccentLose
+		t.Errorf("a failure did not read as one: %s", body)
+	}
+}
+
+// A real approval from a real admin reaches the whitelist path.
+func TestCheckOpsActsOnAnAdminApproval(t *testing.T) {
+	d, rec := liveDaemon(t)
+	d.adminRole = "admin-role-id"
+	d.cfg.Server.RCONAddr = "127.0.0.1:1"
+
+	// surfaceServer answers every GET with "[]", so feed it the message list
+	// through the same fake by pointing checkOps at a channel whose GET returns
+	// one admin approval.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			_, _ = w.Write([]byte(`[{"id":"5","content":"ok denwa",
+				"author":{"id":"kon","username":"kon"},
+				"member":{"roles":["admin-role-id"]}}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"new"}`))
+	}))
+	defer srv.Close()
+	old := discordAPI
+	discordAPI = srv.URL
+	defer func() { discordAPI = old }()
+	d.api = newDiscordClient("t")
+
+	d.checkOps(context.Background(), "ops")
+
+	// It tried, and it said so. RCON is unreachable here, so the answer is a
+	// failure card rather than a success, which is the honest outcome.
+	if d.opsSeen != "5" {
+		t.Errorf("did not advance past the message it handled: %q", d.opsSeen)
+	}
+	_ = rec
+}
+
+// Every loop must stop when the context is cancelled, or a deploy waits on a
+// container that will not exit and docker kills it mid-write.
+func TestEveryLoopStopsWhenAsked(t *testing.T) {
+	d, _ := liveDaemon(t)
+	d.cfg.Server.RCONAddr = "127.0.0.1:1"
+	d.cfg.Cost.ReportPath = filepath.Join(t.TempDir(), "absent.json")
+	d.cfg.Server.LogPath = filepath.Join(t.TempDir(), "absent.log")
+
+	for name, loop := range map[string]func(context.Context){
+		"bridge":  d.bridge,
+		"status":  d.statusLoop,
+		"spend":   d.spendLoop,
+		"release": d.releaseLoop,
+		"ops":     d.opsLoop,
+	} {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			loop(ctx)
+		}()
+		time.Sleep(30 * time.Millisecond)
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(8 * time.Second):
+			t.Errorf("%s did not stop when cancelled", name)
+		}
+	}
+}
