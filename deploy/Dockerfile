@@ -4,7 +4,7 @@
 # Build from the repository root:
 #   docker build -f deploy/Dockerfile -t wly:local .
 
-FROM golang:1.26.6-alpine AS build
+FROM golang:1.27.0-alpine AS build
 WORKDIR /src
 
 # Dependencies first, so a source-only change does not refetch the module cache.
