@@ -329,26 +329,6 @@ func TestAskToLetThemInNeedsBothNameAndUUID(t *testing.T) {
 	}
 }
 
-// The channel is admin-only and that is Discord's enforcement. Checking the role
-// as well is defence in depth: a permission edit or an integration must not
-// silently become a route to an operator command.
-func TestOnlyAdminsCanApprove(t *testing.T) {
-	d := testDaemon(t)
-	d.adminRole = "admin-role-id"
-
-	if !d.isAdmin([]string{"other", "admin-role-id"}) {
-		t.Error("an admin was refused")
-	}
-	if d.isAdmin([]string{"player", "supporter"}) {
-		t.Error("a non-admin was accepted")
-	}
-	// Unknown means no, never "probably fine".
-	d.adminRole = ""
-	if d.isAdmin([]string{"anything"}) {
-		t.Error("approvals were accepted with no admin role resolved")
-	}
-}
-
 // A restart must not replay every approval ever typed and re-run each one, the
 // same rule the log tailer follows by starting at the end.
 func TestOpsLoopStartsFromNow(t *testing.T) {
@@ -395,7 +375,7 @@ func TestCheckOpsIgnoresItsOwnPostsAndChatter(t *testing.T) {
 
 	d := testDaemon(t)
 	d.api = newDiscordClient("t")
-	d.adminRole = "admin-role-id"
+	d.adminRoles = map[string]bool{"admin-role-id": true}
 	d.cfg.Server.RCONAddr = "127.0.0.1:1" // nothing listens; no command can run
 
 	d.checkOps(context.Background(), "ops")
@@ -436,7 +416,7 @@ func TestWhitelistAnswersWhenTheServerIsUnreachable(t *testing.T) {
 // A real approval from a real admin reaches the whitelist path.
 func TestCheckOpsActsOnAnAdminApproval(t *testing.T) {
 	d, rec := liveDaemon(t)
-	d.adminRole = "admin-role-id"
+	d.adminRoles = map[string]bool{"admin-role-id": true}
 	d.cfg.Server.RCONAddr = "127.0.0.1:1"
 
 	// surfaceServer answers every GET with "[]", so feed it the message list
@@ -495,5 +475,33 @@ func TestEveryLoopStopsWhenAsked(t *testing.T) {
 		case <-time.After(8 * time.Second):
 			t.Errorf("%s did not stop when cancelled", name)
 		}
+	}
+}
+
+// The guild owner holds every permission implicitly and may wear no roles at
+// all. Checking only for a named role refused them, which is exactly backwards:
+// they are the most likely person to be typing in #ops.
+func TestOwnerMayApprove(t *testing.T) {
+	d := testDaemon(t)
+	d.owner = "owner-id"
+	d.adminRoles = map[string]bool{"admin-role": true}
+
+	if !d.mayApprove("owner-id", nil) {
+		t.Error("the guild owner was refused, holding no roles")
+	}
+	if !d.mayApprove("someone", []string{"admin-role"}) {
+		t.Error("an admin role was refused")
+	}
+	if d.mayApprove("someone", []string{"player", "supporter"}) {
+		t.Error("a non-admin was accepted")
+	}
+	if d.mayApprove("", nil) {
+		t.Error("an empty author was accepted")
+	}
+
+	// Nothing resolved means nobody approves, rather than everybody.
+	empty := testDaemon(t)
+	if empty.mayApprove("anyone", []string{"any-role"}) {
+		t.Error("approvals were accepted with no owner and no admin roles")
 	}
 }

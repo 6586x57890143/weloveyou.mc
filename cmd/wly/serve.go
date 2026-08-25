@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -71,7 +71,12 @@ type daemon struct {
 
 	rconPassword string
 	budget       float64
-	adminRole    string
+	// adminRoles are the roles an approval may carry: the one guild.toml
+	// declares, plus every role holding ADMINISTRATOR.
+	adminRoles map[string]bool
+	// owner is the guild owner, who holds every permission implicitly and may
+	// wear no roles at all. Refusing them was the first thing this got wrong.
+	owner string
 
 	// mu guards everything below, which the bridge and the status loop both
 	// touch.
@@ -201,22 +206,43 @@ func newDaemon(guildPath, wlyPath string, out io.Writer) (*daemon, error) {
 		d.emoji[e.Name] = e.ID
 	}
 
-	// The admin role, by the name guild.toml declares rather than an id pasted
-	// into config. Absent means every approval is refused, which is the right
-	// way round: an unknown role must not read as "probably fine".
-	var roles []struct{ ID, Name string }
+	// Who may approve. Three sources, because "the role guild.toml calls admin"
+	// on its own refused the guild OWNER, who holds every permission implicitly
+	// and may wear no roles whatsoever. That is the most likely person to be
+	// typing in #ops and it is the first thing this got wrong in front of a
+	// user.
+	var guild struct {
+		OwnerID string `json:"owner_id"`
+	}
+	if err := d.api.do("GET", "/guilds/"+g.Meta.ID, nil, &guild); err != nil {
+		return nil, err
+	}
+	d.owner = guild.OwnerID
+
+	var roles []struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Permissions string `json:"permissions"`
+	}
 	if err := d.api.do("GET", "/guilds/"+g.Meta.ID+"/roles", nil, &roles); err != nil {
 		return nil, err
 	}
+	d.adminRoles = map[string]bool{}
 	for _, r := range roles {
+		// Permissions arrive as a decimal STRING, because the bitfield exceeds
+		// what a JSON number is guaranteed to carry.
+		if bits, err := strconv.ParseUint(r.Permissions, 10, 64); err == nil &&
+			bits&permAdministrator != 0 {
+			d.adminRoles[r.ID] = true
+		}
 		for _, want := range g.Roles {
 			if want.Manual && r.Name == want.Name {
-				d.adminRole = r.ID
+				d.adminRoles[r.ID] = true
 			}
 		}
 	}
-	if d.adminRole == "" {
-		fmt.Fprintln(out, "no manual (admin) role found; approvals in #ops will be refused")
+	if len(d.adminRoles) == 0 && d.owner == "" {
+		fmt.Fprintln(out, "nobody can approve in #ops: no owner and no admin role resolved")
 	}
 	return d, nil
 }
@@ -433,8 +459,11 @@ func (d *daemon) askToLetThemIn(player, uuid string) {
 		return
 	}
 
-	// Once per player per run of the daemon. A client that retries every few
-	// seconds would otherwise fill #ops with the same person.
+	// Once per player. The in-memory half stops a client retrying every few
+	// seconds from filling #ops; the channel itself is what survives a restart,
+	// which the in-memory half cannot. Both are needed: without the first the
+	// channel fills in seconds, and without the second a redeploy re-asks for
+	// everyone waiting, which is exactly what happened the first time.
 	d.mu.Lock()
 	if d.asked == nil {
 		d.asked = map[string]bool{}
@@ -444,6 +473,9 @@ func (d *daemon) askToLetThemIn(player, uuid string) {
 	d.mu.Unlock()
 	if already {
 		return
+	}
+	if asked, err := d.alreadyAsked(ops, uuid); err != nil || asked {
+		return // unsure means stay quiet, the same as everywhere else here
 	}
 
 	p, err := discord.ResolveEmoji(discord.JoinRequest(discord.JoinRequestData{
@@ -463,6 +495,25 @@ func (d *daemon) askToLetThemIn(player, uuid string) {
 // whitelistPath is a var so tests can point it at a fixture. wly mounts mc-data
 // read-only at /mc, so this is a read and can never be anything else.
 var whitelistPath = "/mc/whitelist.json"
+
+// alreadyAsked looks for this player's uuid in what #ops already holds.
+//
+// Discord is the store, the same as it is for the pinned surfaces and the
+// release announcement. A uuid is searched for rather than a name because it is
+// the thing that cannot be typed differently, and the raw message JSON is
+// searched because a Components V2 message has no content field.
+func (d *daemon) alreadyAsked(channelID, uuid string) (bool, error) {
+	var msgs []json.RawMessage
+	if err := d.api.do("GET", "/channels/"+channelID+"/messages?limit=50", nil, &msgs); err != nil {
+		return false, err
+	}
+	for _, m := range msgs {
+		if strings.Contains(string(m), uuid) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 // whitelisted reads the server's own whitelist.json, which wly has mounted
 // read-only at /mc. The second return is false when the file could not be read
@@ -960,7 +1011,7 @@ func (d *daemon) checkOps(ctx context.Context, channelID string) {
 		// rather than ours. Checking the role as well is defence in depth: a
 		// permission edit, an integration, or a channel someone widens by hand
 		// should not silently become a route to an operator command.
-		if !d.isAdmin(m.Member.Roles) {
+		if !d.mayApprove(m.Author.ID, m.Member.Roles) {
 			fmt.Fprintf(d.out, "ops: ignoring %q from %s, who is not an admin\n",
 				m.Content, m.Author.Username)
 			continue
@@ -969,11 +1020,26 @@ func (d *daemon) checkOps(ctx context.Context, channelID string) {
 	}
 }
 
-func (d *daemon) isAdmin(roles []string) bool {
-	if d.adminRole == "" {
-		return false // unknown means no, never "probably fine"
+// permAdministrator is Discord's ADMINISTRATOR bit. A role holding it can do
+// anything in the guild, so it is the honest definition of an admin rather than
+// a role that happens to be named one.
+const permAdministrator uint64 = 1 << 3
+
+// mayApprove reports whether this person can whitelist somebody.
+//
+// The guild owner always can: they hold every permission implicitly, and
+// Discord does not give them a role to prove it. Checking only for a named role
+// refused them, which is exactly backwards.
+func (d *daemon) mayApprove(authorID string, roles []string) bool {
+	if authorID != "" && authorID == d.owner {
+		return true
 	}
-	return slices.Contains(roles, d.adminRole)
+	for _, r := range roles {
+		if d.adminRoles[r] {
+			return true
+		}
+	}
+	return false
 }
 
 // whitelist runs the command and says what happened, either way.
