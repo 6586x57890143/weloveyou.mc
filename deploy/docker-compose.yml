@@ -233,8 +233,23 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
 
+    # Both config paths are passed EXPLICITLY rather than left to the flag
+    # defaults. The defaults are relative ("guild.toml", "wly.toml") and the
+    # image is distroless with no WORKDIR, so the daemon looked for /guild.toml,
+    # found nothing, and restart-looped ten times before anyone saw it:
+    #
+    #   wly: guild config: open guild.toml: no such file or directory
+    #
+    # guild.toml was not mounted at all, which is the other half: the daemon
+    # reads it for the channel ids every surface is posted to.
+    command: ["serve", "--config", "/config/guild.toml", "--wly", "/config/wly.toml"]
+
     environment:
-      WLY_CONFIG: /config/wly.toml
+      # REMOVED: WLY_CONFIG. It pointed at /config/wly.toml and NOTHING READ IT,
+      # so it looked like the config was wired when it was not. A setting that
+      # is ignored is worse than one that is absent, because it stops you
+      # looking for the real reason. The paths are arguments now, where they are
+      # visibly load-bearing.
       WLY_RCON_PASSWORD: "${RCON_PASSWORD:?}"
       WLY_DISCORD_TOKEN: "${WLY_DISCORD_TOKEN:-}"
       # The spend surface escalates against this, matching cost-push.sh on the
@@ -252,6 +267,9 @@ services:
 
     volumes:
       - ../wly.toml:/config/wly.toml:ro
+      # The declared server. The daemon reads it for the channel id behind every
+      # surface, so without it there is nowhere to post and it exits.
+      - ../guild.toml:/config/guild.toml:ro
       # Read-only: wly tails latest.log, reads world/stats for first-join and
       # the leaderboards, and reads squaremap's tiles. It has no business
       # writing into the server's data directory, and the log bridge is the
